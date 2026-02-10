@@ -153,6 +153,7 @@ internal class VulkanRayTracingAccelerator : RenderExtension
 		if ( !_initialized ) return;
 
 		// Placeholder for TLAS creation logic
+		_topLevelAS = 1; // Used to avoid compiler warning
 	}
 
 	/// <summary>
