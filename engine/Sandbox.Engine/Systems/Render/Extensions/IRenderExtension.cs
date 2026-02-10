@@ -5,7 +5,7 @@ namespace Sandbox.Rendering;
 /// <summary>
 /// A render extension that can inject layers into the render pipeline.
 /// </summary>
-public interface IRenderExtension
+internal interface IRenderExtension
 {
 	/// <summary>
 	/// Called when layers are being added to the view.
