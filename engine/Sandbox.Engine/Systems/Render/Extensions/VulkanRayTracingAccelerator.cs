@@ -87,6 +87,16 @@ internal class VulkanRayTracingAccelerator : RenderExtension
 	private List<ulong> _bottomLevelAS = new();
 	private ulong _topLevelAS;
 
+	/// <summary>
+	/// Returns the Top-Level Acceleration Structure handle.
+	/// </summary>
+	public ulong TopLevelAS => _topLevelAS;
+
+	/// <summary>
+	/// Returns the list of Bottom-Level Acceleration Structure handles.
+	/// </summary>
+	public IReadOnlyList<ulong> BottomLevelAS => _bottomLevelAS;
+
 	public VulkanRayTracingAccelerator()
 	{
 		InitializeVulkanFunctions();
