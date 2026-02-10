@@ -2,22 +2,42 @@ namespace Sandbox;
 
 using Editor;
 using Facepunch.ActionGraphs;
+using Sandbox.Rendering;
 using System;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 
 /// <summary>
-/// Dynamic Diffuse Global Illumination volume that provides indirect lighting using a 3D probe grid.
+/// Provides indirect lighting using a 3D probe grid.
 /// Probes store irradiance and distance data in volume textures that can be sampled by shaders.
 /// </summary>
 [Expose]
-[Title( "Indirect Light Volume (DDGI)" )]
+[Title( "Indirect Light Volume" )]
 [Category( "Rendering" )]
 [Icon( "grid_view" )]
 [EditorHandle( "materials/gizmo/lpv.png" )]
 [Alias( "DDGIVolume" )]
-public sealed partial class IndirectLightVolume : Component, Component.ExecuteInEditor, Component.DontExecuteOnServer
+public sealed partial class IndirectLightVolume : Component, Component.ExecuteInEditor, Component.DontExecuteOnServer, Component.IRenderThread
 {
+	/// <summary>
+	/// The Global Illumination method to use for this volume.
+	/// </summary>
+	public enum GIMethod
+	{
+		/// <summary>
+		/// Dynamic Diffuse Global Illumination. High quality, stable, but expensive to bake.
+		/// </summary>
+		[Icon( "grid_view" )]
+		DDGI,
+
+		/// <summary>
+		/// Lux Global Illumination. High performance, software screen-space raytraced, real-time dynamic.
+		/// </summary>
+		[Icon( "bolt" )]
+		Lux
+	}
+
 	/// <summary>
 	/// Behavior when a probe is detected inside geometry.
 	/// Relocation moves the probe out of geometry to reduce artifacts, while Deactivate simply disables the occluded probe, sealing leaks entirely.
@@ -54,6 +74,18 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	//
 	// Properties
 	//
+
+	/// <summary>
+	/// The Global Illumination method to use.
+	/// </summary>
+	[Property, MakeDirty]
+	public GIMethod Method { get; set; } = GIMethod.DDGI;
+
+	/// <summary>
+	/// If enabled, the volume will update in real-time.
+	/// </summary>
+	[Property, MakeDirty]
+	public bool Realtime { get; set; } = false;
 
 	/// <summary>
 	/// World-space bounding box that defines the volume coverage area.
@@ -105,6 +137,8 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	[Property, Hide]
 	public Texture RelocationTexture { get; set; }
 
+	private LuxProbeUpdater _luxUpdater;
+
 	/// <summary>
 	/// Cancellation source for the current bake operation.
 	/// </summary>
@@ -114,25 +148,82 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	// Component Lifecycle
 	//
 
-	protected override void OnEnabled()
+		protected override void OnEnabled()
+		{
+			base.OnEnabled();
+			Transform.OnTransformChanged += OnDirty;
+	
+			LoadProbesFromRelocationTexture();
+			OnDirty();
+		}
+	
+		protected override void OnDisabled()
+		{
+			base.OnDisabled();
+			Transform.OnTransformChanged -= OnDirty;
+	
+			_bakeCts?.Cancel();
+			_bakeCts?.Dispose();
+			_bakeCts = null;
+	
+			_luxUpdater?.Dispose();
+			_luxUpdater = null;
+	
+			Scene.Get<DDGIVolumeSystem>()?.MarkDirty();
+		}
+	
+		void Component.IRenderThread.OnRenderStage( CameraComponent camera, Stage stage )
+		{
+			if ( stage != Stage.AfterOpaque )
+				return;
+	
+			if ( !Realtime || Method != GIMethod.Lux )
+				return;
+	
+			EnsureTexturesCreated();
+	
+			if ( _luxUpdater is null )
+				_luxUpdater = new LuxProbeUpdater( this );
+	
+			_luxUpdater.Update();
+		}
+		private void EnsureTexturesCreated()
 	{
-		base.OnEnabled();
-		Transform.OnTransformChanged += OnDirty;
+		var counts = ProbeCounts;
 
-		LoadProbesFromRelocationTexture();
-		OnDirty();
+		// Irradiance: 6x6 octahedral map + 2 pixel border per probe
+		const int irradianceOctSize = 8;
+		var irradianceSize = new Vector3Int( counts.x * irradianceOctSize, counts.y * irradianceOctSize, counts.z );
+		if ( !IrradianceTexture.IsValid() || IrradianceTexture.Width != irradianceSize.x || IrradianceTexture.Height != irradianceSize.y || IrradianceTexture.Depth != irradianceSize.z )
+		{
+			IrradianceTexture?.Dispose();
+			IrradianceTexture = Texture.CreateVolume( irradianceSize.x, irradianceSize.y, irradianceSize.z, ImageFormat.RGBA16161616F )
+				.WithName( "Irradiance" )
+				.WithUAVBinding()
+				.Finish();
+		}
+
+		// Distance: 14x14 octahedral map + 2 pixel border per probe
+		const int distanceOctSize = 16;
+		var distanceSize = new Vector3Int( counts.x * distanceOctSize, counts.y * distanceOctSize, counts.z );
+		if ( !DistanceTexture.IsValid() || DistanceTexture.Width != distanceSize.x || DistanceTexture.Height != distanceSize.y || DistanceTexture.Depth != distanceSize.z )
+		{
+			DistanceTexture?.Dispose();
+			DistanceTexture = Texture.CreateVolume( distanceSize.x, distanceSize.y, distanceSize.z, ImageFormat.RGBA16161616F )
+				.WithName( "Distance" )
+				.WithUAVBinding()
+				.Finish();
+		}
+
+		if ( !RelocationTexture.IsValid() || RelocationTexture.Width != counts.x || RelocationTexture.Height != counts.y || RelocationTexture.Depth != counts.z )
+		{
+			ComputeProbeRelocation();
+			RelocationTexture = GeneratedRelocationTexture;
+		}
 	}
 
-	protected override void OnDisabled()
+	protected override void OnUpdate()
 	{
-		base.OnDisabled();
-		Transform.OnTransformChanged -= OnDirty;
-
-		_bakeCts?.Cancel();
-		_bakeCts?.Dispose();
-		_bakeCts = null;
-
-		Scene.Get<DDGIVolumeSystem>()?.MarkDirty();
 	}
 
 	protected override void OnDirty()
@@ -161,13 +252,13 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 
 		// Not needed if GPU RT
 		ComputeProbeRelocation();
+		RelocationTexture = GeneratedRelocationTexture;
 
 		using var updater = new DDGIProbeUpdaterCubemapper( this );
 
 		// Update for preview
 		IrradianceTexture = updater.GeneratedIrradianceTexture;
 		DistanceTexture = updater.GeneratedDistanceTexture;
-		RelocationTexture = GeneratedRelocationTexture;
 		Scene.Get<DDGIVolumeSystem>()?.MarkDirty();
 
 		using var linkedCt = CancellationTokenSource.CreateLinkedTokenSource( ct, _bakeCts.Token, GameObject.EnabledToken );
@@ -248,16 +339,20 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 			return source;
 
 		var sceneFolder = Scene.Editor.GetSceneFolder();
-		var filename = $"/ddgi/{GameObject?.Name ?? "DDGIVolume"}_{suffix}_{Id}.vtex_c";
+		var safeName = (GameObject?.Name ?? "DDGIVolume").Replace( " ", "_" ).ToLower();
+		var filename = $"/ddgi/{safeName}_{suffix}_{Id}.vtex";
 
 		var vtexBytes = source.SaveToVtex( format );
 		var path = sceneFolder.WriteFile( filename, vtexBytes );
 
 		var saved = Texture.Load( path );
-		if ( saved is not null )
+		if ( saved is not null && !saved.IsError )
+		{
 			source.Dispose();
+			return saved;
+		}
 
-		return saved ?? source;
+		return source;
 	}
 
 	//
@@ -299,6 +394,7 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 			RelocationTextureIndex = RelocationTexture.Index,
 			IrradianceTextureIndex = IrradianceTexture.Index,
 			DistanceTextureIndex = DistanceTexture.Index,
+			Method = (int)Method
 		};
 
 		return true;
@@ -319,6 +415,7 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		public int DistanceTextureIndex;
 		public Vector3Int ProbeCounts;
 		public int RelocationTextureIndex;
+		public int Method;
 	}
 
 	//
@@ -418,5 +515,3 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		await Application.Editor.ForEachAsync( components, "Baking Indirect Light Volumes in Scene", ( x, ct ) => x.BakeProbes( ct ) );
 	}
 }
-
-

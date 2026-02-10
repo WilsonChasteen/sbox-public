@@ -1,4 +1,4 @@
-#ifndef DDGI_HLSL
+#ifndef DDGI_HLSL 
 #define DDGI_HLSL
 
 #include "common/classes/Bindless.hlsl"
@@ -174,33 +174,41 @@ class DDGI
         return distanceTex.SampleLevel( DDGISampler, uvw, 0.0f ).rg;
     }
 
+    // Improved visibility estimator:
+    // - Uses a Gaussian falloff based on variance (more physically plausible than raw Chebyshev)
+    // - Stronger cutoff when the sample distance is several sigma beyond the mean (eliminates tail light-leak)
+    // - Higher min variance to avoid numerical instability and over-sharp shadows
     static float ComputeVisibility(float distanceToSample, float2 meanVariance)
     {
         float mean = meanVariance.x;           // Mean distance
-        float variance = meanVariance.y;        // Variance of distance
+        float variance = meanVariance.y;       // Variance of distance
 
-        // Minimum variance threshold to prevent numerical instability
-        // and overly harsh shadows from low-variance regions
-        const float minVariance = 0.001f;
+        // Raise the minimum variance to avoid over-sharp responses from noisy probes
+        const float minVariance = 0.01f;
         variance = max(variance, minVariance);
 
-        // If we're clearly in front of the mean surface, fully visible
-        // Small epsilon to handle grazing angles
-        if (distanceToSample <= mean * 1.01f)
+        // If sample is in front of or at the mean, consider fully visible (handles near-surface)
+        if (distanceToSample <= mean)
             return 1.0f;
 
         float delta = distanceToSample - mean;
-        float chebyshev = variance / (variance + delta * delta);
+        float sigma = sqrt(variance);
 
-        // Sharpen the curve to reduce light leaking
-        chebyshev = chebyshev * chebyshev * chebyshev; // pow(chebyshev, 3)
-        
-        // Apply a smooth threshold to cut off very low visibility values
-        // This helps eliminate residual light leak from the tail of the distribution
-        const float visibilityThreshold = 0.05f;
-        chebyshev = smoothstep(0.0f, visibilityThreshold * 2.0f, chebyshev) * chebyshev;
+        // Hard cutoff: if we're far outside the distribution, treat as occluded (kills leaking tails)
+        const float cutoffSigma = 3.0f;
+        if (delta > cutoffSigma * sigma)
+            return 0.0f;
 
-        return chebyshev;
+        // Gaussian-style falloff (probability-like)
+        float vis = exp(- (delta * delta) / (2.0f * variance));
+
+        // Sharpen a little to keep shadows crisp but smooth (power preserves smoothness)
+        vis = pow(vis, 2.0f);
+
+        // Tiny floor removal to avoid residual faint leaking
+        vis = max(vis - 0.02f, 0.0f);
+
+        return vis;
     }
 
     static bool IsEnabled()
@@ -276,39 +284,52 @@ class DDGI
             if ( distanceToProbe < 1e-5f )
                 continue;
 
-            float3 direction = -probeToPoint / distanceToProbe;
+            // direction from probe -> surface (this is the direction the probe sampled to record irradiance)
+            float3 dirProbeToPoint = (positionPs - relocatedProbePos) / distanceToProbe;
+
+            // direction from surface -> probe (useful for backface weighting)
+            float3 trueDirectionToProbe = normalize(relocatedProbePos - positionPs);
 
             float3 trilinear = lerp( 1.0f - alpha, alpha, float3( offset ) );
             float weight = 1.0f;
 
-            float3 trueDirectionToProbe = normalize( relocatedProbePos - positionPs );
-            
             // Backface weight: aggressively reduce contribution from probes behind the surface
-            // Using a tighter wrap that doesn't add a constant offset
             float backfaceDot = dot( trueDirectionToProbe, normalWs );
-            
-            // Smooth falloff that reaches zero at 90 degrees from normal
-            // This prevents probes on the other side of walls from contributing
-            float wrapValue = saturate( (backfaceDot + 1.0f) * 0.5f );
-            weight *= (wrapValue * wrapValue) + 0.2f;
 
-            float2 distanceMoments = SampleProbeDistance( volume, distanceTex, probeGridCoord, direction );
+            // Stronger falloff that reaches zero at 90 degrees from normal
+            // Cube the saturate to make the cutoff sharper while staying smooth
+            float backfaceWeight = pow( saturate(backfaceDot), 3.0f );
+            weight *= backfaceWeight;
+
+            // Distance-based falloff: reduce contribution from very far probes to avoid large-scale bleeding
+            // Use a soft falloff tied to the probe spacing (approximate local scale)
+            float localProbeRadius = max( max(volume.ProbeSpacing.x, volume.ProbeSpacing.y), volume.ProbeSpacing.z ) * 4.0f;
+            float distanceFalloff = saturate( 1.0f - (distanceToProbe / (localProbeRadius + 1e-6f)) );
+            // Use squared falloff for smoother near-probe dominance
+            weight *= distanceFalloff * distanceFalloff;
+
+            // Sample distance moments using the probe->point direction (consistent orientation)
+            float2 distanceMoments = SampleProbeDistance( volume, distanceTex, probeGridCoord, dirProbeToPoint );
+
+            // Compute visibility using improved estimator
             float visibility = ComputeVisibility( distanceToProbe, distanceMoments );
             weight *= visibility;
 
-            float3 irradiance = SampleProbeIrradiance( volume, irradianceTex, probeGridCoord, -normalWs );
+            // Sample irradiance using the direction that points from the probe to the surface point.
+            // THIS IS THE CRITICAL FIX: previously sampling with -normalWs caused wrong texel lookups and splotches.
+            float3 irradiance = SampleProbeIrradiance( volume, irradianceTex, probeGridCoord, dirProbeToPoint );
 
-            // Aggressively crush low weights to reduce light leaking
-            // Probes with very low visibility/backface weight are likely leaking
-            const float crushThreshold = 0.25f;
+            // Aggressively crush low weights to reduce light leaking from small contributions
+            const float crushThreshold = 0.18f;
             if ( weight < crushThreshold )
             {
-                // Cubic falloff for smooth but aggressive crushing
+                // Smooth but steep collapse — reduces tiny noisy contributions
                 float t = weight / crushThreshold;
-                weight = crushThreshold * t * t * t;
+                weight = t * t * t * crushThreshold; // cubic ramp to near-zero
             }
 
-            weight *= trilinear.x * trilinear.y * trilinear.z;
+            // Blend factor between the 8 neighboring probes (trilinear)
+            weight *= (trilinear.x * trilinear.y * trilinear.z);
 
             accumulatedIrradiance += weight * irradiance;
             accumulatedWeight += weight;
@@ -317,14 +338,9 @@ class DDGI
         if ( accumulatedWeight <= 1e-5f )
             return 0;
 
+        // Final scale to match energy (unchanged)
         return (0.5f * 3.14159265f) * (accumulatedIrradiance / accumulatedWeight);
     }
 };
 
 #endif // DDGI_HLSL
-
-
-
-
-
-

@@ -1,0 +1,19 @@
+{
+  "files.associations": {
+    "*.shader": "slang",
+    "*.hlsl": "slang"
+  },
+  "slang.additionalSearchPaths": [
+    "C:\\users\\wilso\\desktop\\sbox-public\\game\\core\\shaders",
+    "C:\\Users\\wilso\\Desktop\\sbox-public\\game\\addons\\base\\Assets\\shaders",
+    "C:\\Users\\wilso\\Desktop\\sbox-public\\game\\addons\\menu\\Assets\\shaders",
+    "C:\\Users\\wilso\\Desktop\\sbox-public\\game\\addons\\tools\\Assets\\shaders",
+    "C:\\Users\\wilso\\Desktop\\sbox-public\\game\\editor\\ShaderGraph\\Assets\\shaders",
+    "C:\\Users\\wilso\\Desktop\\sbox-public\\game\\editor\\ActionGraph\\Assets\\shaders",
+    "C:\\Users\\wilso\\Desktop\\sbox-public\\game\\editor\\MovieMaker\\Assets\\shaders",
+    "C:\\Users\\wilso\\Desktop\\sbox-public\\game\\editor\\Hammer\\Assets\\shaders",
+    "C:\\Users\\wilso\\Desktop\\sbox-public\\game\\samples\\sweeper\\Assets\\shaders"
+  ],
+  "slang.predefinedMacros": [],
+  "slang.workspaceFlavor": "vfx"
+}
