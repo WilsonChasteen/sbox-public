@@ -23,6 +23,8 @@ public partial class SceneObject : IHandle
 
 	#endregion
 
+	bool _hadBloomFlag;
+
 	RenderAttributes _attributes;
 	public RenderAttributes Attributes
 	{
@@ -100,11 +102,22 @@ public partial class SceneObject : IHandle
 			World.InternalSceneObjects.Add( this );
 		}
 
+		_hadBloomFlag = Flags.HasFlag( Rendering.SceneObjectFlags.EffectsBloomLayer );
+		if ( _hadBloomFlag )
+		{
+			if ( World?.Scene is not null ) System.Threading.Interlocked.Increment( ref World.Scene._bloomObjectsCount );
+		}
+
 		//Log.Info( $"Created SceneObject: {GetType().Name}" );
 	}
 
 	internal virtual void OnNativeDestroy()
 	{
+		if ( _hadBloomFlag )
+		{
+			if ( World?.Scene is not null ) System.Threading.Interlocked.Decrement( ref World.Scene._bloomObjectsCount );
+		}
+
 		lock ( World.InternalSceneObjects )
 		{
 			World.InternalSceneObjects.Remove( this );
@@ -433,6 +446,22 @@ public partial class SceneObject : IHandle
 
 		internal void SetFlag( Rendering.SceneObjectFlags f, bool val )
 		{
+			if ( f == Rendering.SceneObjectFlags.EffectsBloomLayer )
+			{
+				if ( Object._hadBloomFlag != val )
+				{
+					Object._hadBloomFlag = val;
+					if ( val )
+					{
+						if ( Object.World?.Scene is not null ) System.Threading.Interlocked.Increment( ref Object.World.Scene._bloomObjectsCount );
+					}
+					else
+					{
+						if ( Object.World?.Scene is not null ) System.Threading.Interlocked.Decrement( ref Object.World.Scene._bloomObjectsCount );
+					}
+				}
+			}
+
 			Object.native.ChangeFlags( val ? f : Rendering.SceneObjectFlags.None, f );
 		}
 

@@ -46,6 +46,13 @@ public partial class Scene : GameObject
 	/// </summary>
 	public RenderAttributes RenderAttributes { get; }
 
+	/// <summary>
+	/// Number of active renderers in this scene that have bloom enabled.
+	/// Used to optimize the render pipeline by skipping the bloom pass if this is 0.
+	/// </summary>
+	internal int BloomObjectsCount => _bloomObjectsCount;
+	internal int _bloomObjectsCount;
+
 	private PhysicsWorld _physicsWorld;
 
 	public PhysicsWorld PhysicsWorld => _physicsWorld ??= CreatePhysicsWorld();
@@ -67,6 +74,8 @@ public partial class Scene : GameObject
 		_all.Add( this );
 
 		SceneWorld = new SceneWorld();
+		SceneWorld.Scene = this;
+
 		Directory = new GameObjectDirectory( this );
 
 		RenderAttributes = new();

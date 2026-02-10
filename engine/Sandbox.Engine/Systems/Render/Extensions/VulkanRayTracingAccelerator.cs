@@ -99,11 +99,12 @@ internal class VulkanRayTracingAccelerator : RenderExtension
 
 	public VulkanRayTracingAccelerator()
 	{
-		InitializeVulkanFunctions();
 	}
 
 	private void InitializeVulkanFunctions()
 	{
+		if ( _initialized ) return;
+
 		IntPtr device = Graphics.VulkanDevice;
 		if ( device == IntPtr.Zero ) return;
 
@@ -120,6 +121,7 @@ internal class VulkanRayTracingAccelerator : RenderExtension
 		catch ( Exception e )
 		{
 			Log.Warning( $"Failed to initialize Vulkan Ray Tracing functions: {e.Message}" );
+			_initialized = false;
 		}
 	}
 
@@ -132,7 +134,11 @@ internal class VulkanRayTracingAccelerator : RenderExtension
 
 	public override void AddLayersToView( RenderPipeline pipeline, ISceneView view, RenderViewport viewport )
 	{
-		if ( !_initialized ) return;
+		if ( !_initialized )
+		{
+			InitializeVulkanFunctions();
+			if ( !_initialized ) return;
+		}
 
 		// Maintain acceleration structures here
 		UpdateAccelerationStructures();

@@ -74,6 +74,8 @@ internal partial class RenderPipeline
 		}
 
 		// Bloom layer, Effects that only show up on bloom like a ghost effect
+		var viewCamera = IManagedCamera.FindById( view.m_ManagedCameraId ) as SceneCamera;
+		if ( viewCamera?.World?.Scene is null || viewCamera.World.Scene.BloomObjectsCount > 0 )
 		{
 			RenderViewport quarterViewport = viewport / 4;
 
@@ -106,6 +108,8 @@ internal partial class RenderPipeline
 		// Opaque pass
 		// Transparent pass
 		// Etc.
+
+		RenderExtensions.AddLayersToView( this, view, viewport );
 	}
 
 	internal void PipelineEnd( ISceneView view, RenderViewport viewport, SceneViewRenderTargetHandle rtColor, SceneViewRenderTargetHandle rtDepth, RenderMultisampleType nMSAA, CRenderAttributes pipelineAttrs, RenderViewport screenSize )
@@ -126,5 +130,7 @@ internal partial class RenderPipeline
 			RecordMovieFrameLayer.AddToView( view, viewport );
 			PostRecordMovieFrameLayer.AddToView( view, viewport );
 		}
+
+		RenderExtensions.PipelineEnd( this, view, viewport );
 	}
 }

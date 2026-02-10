@@ -19,6 +19,11 @@ public sealed partial class SceneWorld : IHandle
 	internal IPVS ActivePVS { get; private set; }
 
 	/// <summary>
+	/// The scene that this world belongs to, if any.
+	/// </summary>
+	internal Scene Scene { get; set; }
+
+	/// <summary>
 	/// List of scene objects belonging to this scene world.
 	/// </summary>
 	public IReadOnlyCollection<SceneObject> SceneObjects

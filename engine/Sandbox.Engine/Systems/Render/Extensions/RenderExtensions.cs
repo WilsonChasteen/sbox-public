@@ -14,7 +14,10 @@ internal static class RenderExtensions
 	static RenderExtensions()
 	{
 		// Auto-register the hardware ray tracing accelerator if we're on Vulkan
-		Register( new VulkanRayTracingAccelerator() );
+		if ( g_pRenderDevice.GetRenderDeviceAPI() == RenderDeviceAPI_t.RENDER_DEVICE_API_VULKAN )
+		{
+			Register( new VulkanRayTracingAccelerator() );
+		}
 	}
 
 	/// <summary>
