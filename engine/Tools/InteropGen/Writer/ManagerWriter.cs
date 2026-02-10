@@ -97,17 +97,26 @@ internal partial class ManagerWriter : BaseWriter
 				WriteLine( "if ( _initialized ) return;" );
 				WriteLine();
 
-				WriteLine( $"if ( !NativeLibrary.TryLoad( System.IO.Path.Combine( NetCore.NativeDllPath, \"{definitions.NativeDll}\" ), out var nativeDll ) )" );
-				WriteLine( $"	Sandbox.Interop.NativeAssemblyLoadFailed( \"{definitions.NativeDll}\" );" );
+				WriteLine( $"var nativeDllName = \"{definitions.NativeDll}\";" );
+				WriteLine( "if ( !OperatingSystem.IsWindows() )" );
+				WriteLine( "{" );
+				WriteLine( "	var baseName = System.IO.Path.GetFileNameWithoutExtension( nativeDllName );" );
+				WriteLine( "	var dir = System.IO.Path.GetDirectoryName( nativeDllName ) ?? \"\";" );
+				WriteLine( "	var ext = OperatingSystem.IsMacOS() ? \".dylib\" : \".so\";" );
+				WriteLine( "	nativeDllName = System.IO.Path.Combine( dir, \"lib\" + baseName + ext );" );
+				WriteLine( "}" );
+				WriteLine();
+				WriteLine( $"if ( !NativeLibrary.TryLoad( System.IO.Path.Combine( NetCore.NativeDllPath, nativeDllName ), out var nativeDll ) )" );
+				WriteLine( "	Sandbox.Interop.NativeAssemblyLoadFailed( nativeDllName );" );
 				WriteLine( "_nativeLibraryHandle = nativeDll;" );
 
 				WriteLine();
 				WriteLine( $"IntPtr nativeInitPtr = NativeLibrary.GetExport( nativeDll, \"igen_{definitions.Ident}\" );" );
-				WriteLine( $"if ( nativeInitPtr == IntPtr.Zero ) throw new System.Exception( \"Couldn't load from {definitions.NativeDll}\" );" );
+				WriteLine( "if ( nativeInitPtr == IntPtr.Zero ) throw new System.Exception( $\"Couldn't load from {nativeDllName}\" );" );
 
 				WriteLine();
-				WriteLine( $"var nativeInit = Marshal.GetDelegateForFunctionPointer<NetCoreImportDelegate>( nativeInitPtr );" );
-				WriteLine( $"if ( nativeInit == null ) throw new System.Exception( \"Couldn't load from {definitions.NativeDll}\" );" );
+				WriteLine( "var nativeInit = Marshal.GetDelegateForFunctionPointer<NetCoreImportDelegate>( nativeInitPtr );" );
+				WriteLine( "if ( nativeInit == null ) throw new System.Exception( $\"Couldn't load from {nativeDllName}\" );" );
 
 				int i = 0;
 
