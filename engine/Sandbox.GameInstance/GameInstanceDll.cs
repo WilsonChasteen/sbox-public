@@ -761,18 +761,43 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 		Api.Performance.CollectStat( "GameObjectCount", sceneValid ? scene.Directory.GameObjectCount : 0 );
 		Api.Performance.CollectStat( "ComponentCount", sceneValid ? scene.Directory.ComponentCount : 0 );
 		Api.Performance.CollectStat( "RootGameObjects", sceneValid ? scene.Children.Count : 0 );
-		Api.Performance.CollectStat( "CameraCount", sceneValid ? scene.GetAllComponents<CameraComponent>().Count() : 0 );
-		Api.Performance.CollectStat( "ColliderCount", sceneValid ? scene.PhysicsWorld.Bodies.Count() : 0 );
-		Api.Performance.CollectStat( "DynamicBodyCount", sceneValid ? scene.PhysicsWorld.Bodies.Where( x => x.BodyType == PhysicsBodyType.Dynamic ).Count() : 0 );
-		Api.Performance.CollectStat( "KeyframeBodyCount", sceneValid ? scene.PhysicsWorld.Bodies.Where( x => x.BodyType == PhysicsBodyType.Keyframed ).Count() : 0 );
-		Api.Performance.CollectStat( "StaticBodyCount", sceneValid ? scene.PhysicsWorld.Bodies.Where( x => x.BodyType == PhysicsBodyType.Static ).Count() : 0 );
-		Api.Performance.CollectStat( "Particles", sceneValid ? scene.GetAllComponents<ParticleEffect>().Sum( x => x.Particles.Count ) : 0 );
+
+		int cameraCount = 0;
+		int colliderCount = 0;
+		int dynamicBodyCount = 0;
+		int keyframeBodyCount = 0;
+		int staticBodyCount = 0;
+		int particleCount = 0;
+
+		// Optimization: Use efficient loops and Execute<T> to avoid per-frame allocations and LINQ overhead
+		if ( sceneValid )
+		{
+			scene.Components.Execute<CameraComponent>( _ => cameraCount++ );
+
+			foreach ( var body in scene.PhysicsWorld.bodies )
+			{
+				if ( !body.IsValid() ) continue;
+				colliderCount++;
+				var type = body.BodyType;
+				if ( type == PhysicsBodyType.Dynamic ) dynamicBodyCount++;
+				else if ( type == PhysicsBodyType.Keyframed ) keyframeBodyCount++;
+				else if ( type == PhysicsBodyType.Static ) staticBodyCount++;
+			}
+
+			scene.Components.Execute<ParticleEffect>( x => particleCount += x.Particles.Count );
+		}
+
+		Api.Performance.CollectStat( "CameraCount", cameraCount );
+		Api.Performance.CollectStat( "ColliderCount", colliderCount );
+		Api.Performance.CollectStat( "DynamicBodyCount", dynamicBodyCount );
+		Api.Performance.CollectStat( "KeyframeBodyCount", keyframeBodyCount );
+		Api.Performance.CollectStat( "StaticBodyCount", staticBodyCount );
+		Api.Performance.CollectStat( "Particles", particleCount );
 
 		Api.Performance.CollectStat( "GameObjectsDestroyed", SceneMetrics.GameObjectsDestroyed );
 		Api.Performance.CollectStat( "ParticlesCreated", SceneMetrics.ParticlesCreated );
 		Api.Performance.CollectStat( "ParticlesDestroyed", SceneMetrics.ParticlesDestroyed );
 		Api.Performance.CollectStat( "GameObjectsCreated", SceneMetrics.GameObjectsCreated );
-		Api.Performance.CollectStat( "GameObjectsDestroyed", SceneMetrics.GameObjectsDestroyed );
 		Api.Performance.CollectStat( "ComponentsCreated", SceneMetrics.ComponentsCreated );
 		Api.Performance.CollectStat( "ComponentsDestroyed", SceneMetrics.ComponentsDestroyed );
 		Api.Performance.CollectStat( "RayTrace", SceneMetrics.RayTrace );
