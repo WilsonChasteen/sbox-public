@@ -33,7 +33,7 @@ public sealed partial class PhysicsWorld : IHandle
 	internal IPhysicsWorld native => world;
 	internal IPhysicsWorld world;
 
-	HashSet<PhysicsBody> bodies = new HashSet<PhysicsBody>();
+	internal HashSet<PhysicsBody> bodies = new HashSet<PhysicsBody>();
 
 	/// <summary>
 	/// All bodies in the world
