@@ -74,8 +74,11 @@ internal partial class RenderPipeline
 		}
 
 		// Bloom layer, Effects that only show up on bloom like a ghost effect
-		var viewCamera = IManagedCamera.FindById( view.m_ManagedCameraId ) as SceneCamera;
-		if ( viewCamera?.World?.Scene is null || viewCamera.World.Scene.BloomObjectsCount > 0 )
+		var cameraId = view.m_ManagedCameraId;
+		var viewCamera = cameraId > 0 ? IManagedCamera.FindById( cameraId ) as SceneCamera : null;
+		var scene = viewCamera?.World?.Scene;
+
+		if ( scene is null || scene.BloomObjectsCount > 0 )
 		{
 			RenderViewport quarterViewport = viewport / 4;
 
@@ -96,6 +99,12 @@ internal partial class RenderPipeline
 
 			BloomDownsampleLayer.RT = bloomRt;
 			BloomDownsampleLayer.AddToView( view, quarterViewport );
+		}
+		else
+		{
+			// Optimization: Skip bloom, but ensure the texture attribute is set to something valid (black)
+			// to avoid using a stale handle from a previous frame in later native passes.
+			view.GetRenderAttributesPtr().SetTextureValue( "QuarterResEffectsBloomInputTexture", Texture.Black.native, -1 );
 		}
 
 		// Refraction stencil layer, used for filtering out depth on Framebuffer copies

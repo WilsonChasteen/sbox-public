@@ -392,9 +392,9 @@ public static partial class Graphics
 	}
 
 	[Obsolete( "Use the CopyTexture overload without 'srcMipLevels' and 'dstMipLevels' parameters instead." )]
-	public static void CopyTexture( Texture srcTexture, Texture dstTexture, int srcMipSlice = 0, int srcArraySlice = 0, int srcMipLevels = 1, int dstMipSlice = 0, int dstArraySlice = 0, int dstMipLevels = 1 )
+	public static void CopyTexture( Texture srcTexture, Texture dstTexture, int srcMipSlice = 0, int srcArraySlice = 0, int srcMipLevels = 1, int dst_MipSlice = 0, int dstArraySlice = 0, int dstMipLevels = 1 )
 	{
-		CopyTexture( srcTexture, dstTexture, srcMipSlice, srcArraySlice, dstMipSlice, dstArraySlice );
+		CopyTexture( srcTexture, dstTexture, srcMipSlice, srcArraySlice, dst_MipSlice, dstArraySlice );
 	}
 
 	/// <summary>

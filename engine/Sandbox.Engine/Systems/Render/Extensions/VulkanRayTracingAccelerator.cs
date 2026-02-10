@@ -84,6 +84,7 @@ internal class VulkanRayTracingAccelerator : RenderExtension
 	#endregion
 
 	private bool _initialized;
+	private bool _failed;
 	private List<ulong> _bottomLevelAS = new();
 	private ulong _topLevelAS;
 
@@ -103,7 +104,7 @@ internal class VulkanRayTracingAccelerator : RenderExtension
 
 	private void InitializeVulkanFunctions()
 	{
-		if ( _initialized ) return;
+		if ( _initialized || _failed ) return;
 
 		IntPtr device = Graphics.VulkanDevice;
 		if ( device == IntPtr.Zero ) return;
@@ -121,7 +122,7 @@ internal class VulkanRayTracingAccelerator : RenderExtension
 		catch ( Exception e )
 		{
 			Log.Warning( $"Failed to initialize Vulkan Ray Tracing functions: {e.Message}" );
-			_initialized = false;
+			_failed = true;
 		}
 	}
 
