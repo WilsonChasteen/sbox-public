@@ -1,0 +1,7 @@
+## 2025-02-10 - Render Extension System & Vulkan RT Integration
+**Learning:** The Source 2 engine's C# layer provides a clean separation for high-level rendering logic via `RenderPipeline`, but low-level API access (like Vulkan ray tracing) requires direct handle exposure and manual function pointer loading via `vkGetDeviceProcAddr` to bypass potentially buggy or incomplete native abstractions. Using a global extension registry allows for injecting specialized hardware-accelerated features without modifying the core pipeline architecture.
+**Action:** Always prefer direct API access for cutting-edge features like Ray Tracing or Neural Shaders to ensure maximum performance and flexibility, while using the C# `RenderPipeline` hooks for high-level integration.
+
+## 2025-02-10 - Conditional Bloom Optimization
+**Learning:** Global bloom passes often incur significant GPU overhead (RT allocations, downsampling, blur) even when no bloom-enabled objects are in the view. Tracking bloom usage at the scene level allows for early-outing the entire bloom pipeline block.
+**Action:** Implement similar tracking for other expensive global passes (SSAO, SSR) to save frame time in scenes where they are not contributing to the final image.
