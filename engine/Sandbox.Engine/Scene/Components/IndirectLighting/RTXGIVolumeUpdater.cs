@@ -23,6 +23,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 	private static ComputeShader ClassifyShader = new ComputeShader( "common/rtxgi/rtxgi_classify" );
 	private static ComputeShader FillRayDataShader = new ComputeShader( "common/rtxgi/rtxgi_fill_raydata" );
 	private static ComputeShader DepthCopyShader = new ComputeShader( "common/rtxgi/rtxgi_depth_copy" );
+	private static RayTracingShader ProbeTraceShader = new RayTracingShader( "common/rtxgi/rtxgi_probe_trace" );
 
 	// Textures
 	public Texture RayDataTexture { get; private set; }
@@ -50,9 +51,15 @@ internal class RTXGIVolumeUpdater : IDisposable
 		_volume = volume;
 		EnsureResources();
 
-		_isUsingFallback = true; // TODO: Detect hardware RT
-		if ( _isUsingFallback )
+		var accelerator = RenderExtensions.Get<VulkanRayTracingAccelerator>();
+		if ( accelerator != null && accelerator.TopLevelAS != 0 )
 		{
+			_isUsingFallback = false;
+			Log.Info( "RTXGI: Using hardware ray tracing for RayData." );
+		}
+		else
+		{
+			_isUsingFallback = true;
 			Log.Info( "RTXGI: Using cubemap capture fallback for RayData." );
 			InitializeFallback();
 		}
@@ -171,12 +178,19 @@ internal class RTXGIVolumeUpdater : IDisposable
 
 		UpdateConstants();
 
-		if ( _isUsingFallback && _volume.Realtime )
+		if ( _volume.Realtime )
 		{
-			for ( int i = 0; i < 2; i++ )
+			if ( _isUsingFallback )
 			{
-				UpdateProbeFallback( _nextProbeToUpdate );
-				_nextProbeToUpdate = ( _nextProbeToUpdate + 1 ) % ( _volume.ProbeCounts.x * _volume.ProbeCounts.y * _volume.ProbeCounts.z );
+				for ( int i = 0; i < 2; i++ )
+				{
+					UpdateProbeFallback( _nextProbeToUpdate );
+					_nextProbeToUpdate = ( _nextProbeToUpdate + 1 ) % ( _volume.ProbeCounts.x * _volume.ProbeCounts.y * _volume.ProbeCounts.z );
+				}
+			}
+			else
+			{
+				UpdateProbeHardwareRT();
 			}
 		}
 
@@ -187,6 +201,28 @@ internal class RTXGIVolumeUpdater : IDisposable
 			DispatchRelocation();
 			DispatchClassification();
 		}
+	}
+
+	private void UpdateProbeHardwareRT()
+	{
+		var accelerator = RenderExtensions.Get<VulkanRayTracingAccelerator>();
+		if ( accelerator == null || accelerator.TopLevelAS == 0 ) return;
+
+		var attrs = RenderAttributes.Pool.Get();
+		attrs.Set( "DDGIVolumes", _descBuffer );
+		attrs.Set( "RayData", RayDataTexture );
+		attrs.Set( "ProbeData", ProbeDataTexture );
+		attrs.Set( "IrradianceTexture", IrradianceTexture );
+		attrs.Set( "DistanceTexture", DistanceTexture );
+
+		// Wrap the TLAS handle
+		var tlas = new RayTracingAccelerationStructure( accelerator.TopLevelAS );
+		attrs.Set( "SceneTLAS", tlas );
+
+		var counts = _volume.ProbeCounts;
+		ProbeTraceShader.DispatchRaysWithAttributes( attrs, 256, counts.x * counts.y, counts.z );
+
+		RenderAttributes.Pool.Return( attrs );
 	}
 
 	private void UpdateProbeFallback( int probeIndex )
@@ -221,12 +257,20 @@ internal class RTXGIVolumeUpdater : IDisposable
 	public async Task Bake( CancellationToken ct )
 	{
 		int numProbes = _volume.ProbeCounts.x * _volume.ProbeCounts.y * _volume.ProbeCounts.z;
-		for ( int i = 0; i < numProbes; i++ )
+		if ( _isUsingFallback )
 		{
-			if ( ct.IsCancellationRequested ) return;
-			UpdateProbeFallback( i );
-			while ( _renderedFace < 6 ) await Task.Delay( 1 );
-			if ( i % 10 == 0 ) await Task.Yield();
+			for ( int i = 0; i < numProbes; i++ )
+			{
+				if ( ct.IsCancellationRequested ) return;
+				UpdateProbeFallback( i );
+				while ( _renderedFace < 6 ) await Task.Delay( 1 );
+				if ( i % 10 == 0 ) await Task.Yield();
+			}
+		}
+		else
+		{
+			UpdateProbeHardwareRT();
+			Graphics.FlushGPU();
 		}
 
 		for ( int i = 0; i < 64; i++ )
