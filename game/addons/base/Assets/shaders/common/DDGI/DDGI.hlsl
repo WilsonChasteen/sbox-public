@@ -48,7 +48,6 @@ class DDGI
         DDGIVolumeDescGPU desc = UnpackDDGIVolumeDescGPU( DDGI_Volumes[volume.Index] );
 
         // Retrieve texture indices from the packed data where we stored them in C#
-        // data12 = (IrradianceTextureIndex, DistanceTextureIndex, ProbeDataTextureIndex, Method)
         float4 indices = DDGI_Volumes[volume.Index].data12;
 
         DDGIVolumeResources resources;
