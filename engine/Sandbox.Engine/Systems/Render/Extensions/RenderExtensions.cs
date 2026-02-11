@@ -27,7 +27,8 @@ internal static class RenderExtensions
 	{
 		lock ( _extensions )
 		{
-			if ( !_extensions.Contains( extension ) )
+			// Avoid double registration of the same type (common during hotload)
+			if ( !_extensions.Any( x => x.GetType() == extension.GetType() ) )
 			{
 				_extensions.Add( extension );
 			}
