@@ -356,7 +356,7 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 
 		var sceneFolder = Scene.Editor.GetSceneFolder();
 		var safeName = (GameObject?.Name ?? "DDGIVolume").Replace( " ", "_" ).ToLower();
-		var filename = $"/ddgi/{safeName}_{suffix}_{Id}.vtex";
+		var filename = $"/ddgi/{safeName}_{suffix}_{Id}.vtex_c";
 
 		var vtexBytes = source.SaveToVtex( format );
 		var path = sceneFolder.WriteFile( filename, vtexBytes );
@@ -390,7 +390,8 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 
 		data = new DDGIVolumeGpuData
 		{
-			Transform = Matrix.FromTransform( WorldTransform ).Inverted,
+			WorldToProbe = Matrix.FromTransform( WorldTransform ).Inverted,
+			ProbeToWorld = Matrix.FromTransform( WorldTransform ),
 			BBoxMin = Bounds.Mins,
 			BBoxMax = Bounds.Maxs,
 			NormalBias = NormalBias,
@@ -407,9 +408,9 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 				probeCounts.z > 1 ? 1.0f / (probeCounts.z - 1) : 0.0f
 			),
 			ProbeCounts = probeCounts,
-			RelocationTextureIndex = RelocationTexture.Index,
-			IrradianceTextureIndex = IrradianceTexture.Index,
-			DistanceTextureIndex = DistanceTexture.Index,
+			RelocationTextureIndex = RelocationTexture?.Index ?? -1,
+			IrradianceTextureIndex = IrradianceTexture?.Index ?? -1,
+			DistanceTextureIndex = DistanceTexture?.Index ?? -1,
 			Method = (int)Method
 		};
 
@@ -419,7 +420,8 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	[StructLayout( LayoutKind.Sequential, Pack = 0 )]
 	internal struct DDGIVolumeGpuData
 	{
-		public Matrix Transform;
+		public Matrix WorldToProbe;
+		public Matrix ProbeToWorld;
 		public Vector3 BBoxMin;
 		public Vector3 BBoxMax;
 		public float NormalBias;

@@ -69,7 +69,7 @@ internal class LuxProbeUpdater : IDisposable
 		if ( grabbedDepth is not null && grabbedDepth.DepthTarget.IsValid() )
 		{
 			attrs.Set( "DepthBuffer", grabbedDepth.DepthTarget );
-			attrs.Set( "DepthChainDownsample", grabbedDepth.DepthTarget );
+			// Stop overriding DepthChainDownsample with a non-mipmapped texture
 		}
 
 		attrs.Set( "BlueNoiseIndex", BlueNoise.Index );

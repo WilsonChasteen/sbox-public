@@ -135,18 +135,18 @@ class HierarchicalRaymarch
         out bool validHit)
     {
         const bool useMipChain = true; // use mip chain for acceleration
-        const int finestMip = 1; // start at mip 1 (2x2 pixels)
+        const int finestMip = 0; // start at mip 0 (full pixel resolution)
 
         float3 invDir = rcp(dir);
 
 
         // Start at the requested mip
-        int   mip       = finestMip;
+        int   mip       = 1; // start at mip 1 for speed, refine down to 0
         float2 mipRes   = GetMipResolution(screenSize, mip);
         float2 mipResInv= rcp(mipRes);
 
         // Offset so the ray starts in the *centre* of its texel box
-        float2 uvOffset = g_vInvViewportSize * exp2(finestMip) * g_vInvViewportSize;
+        float2 uvOffset = 0.5f * g_vInvViewportSize;
         uvOffset        = dir.xy < 0 ? -uvOffset : uvOffset;
         float2 floorOff = dir.xy < 0 ? 0 : 1;
 
@@ -155,19 +155,21 @@ class HierarchicalRaymarch
         InitialAdvanceRay(origin, dir, invDir, mipRes, mipResInv, floorOff, uvOffset, pos, t);
 
         uint i      = 0;
-        uint k      = 5u; // = 32‑pixel step for first back‑trace
+        uint k      = 5u; // = 32-pixel step for first back-trace
 
         while (i < maxIntersections && mip >= finestMip )
         {
             if (any(pos.xyz <= 0) || any(pos.xyz >= 1)) break; // outside screen
 
             float2 mipPos = mipRes * pos.xy;
-            if (mip < 2) mipPos = dir.xy < 0 ? floor(mipPos) : ceil(mipPos);
-
-            float z = LoadDepth(mipPos, mip );
+            float z = LoadDepth(int2(mipPos), mip);
 
             bool skipped = AdvanceRay(origin, dir, invDir, mipPos, mipResInv,
                                       floorOff, uvOffset, z, pos, t);
+            
+            // Step forward to ensure we cross boundaries (adaptive epsilon)
+            t += max(1e-4f, 2.0f * length(g_vInvViewportSize));
+            pos = origin + t * dir;
 
             if (useMipChain)
             {
