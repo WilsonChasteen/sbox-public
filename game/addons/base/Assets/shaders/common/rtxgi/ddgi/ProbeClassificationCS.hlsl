@@ -18,7 +18,7 @@
 
 // -------- DEFINE VALIDATION ---------------------------------------------------------------------
 
-#include "include/validation/ProbeClassificationDefines.hlsl"
+#include "common/rtxgi/ddgi/include/validation/ProbeClassificationDefines.hlsl"
 
 // -------- REGISTER DECLARATIONS -----------------------------------------------------------------
 
@@ -52,8 +52,8 @@
 
 // -------- ROOT / PUSH CONSTANT DECLARATIONS -----------------------------------------------------
 
-#include "include/ProbeCommon.hlsl"
-#include "include/DDGIRootConstants.hlsl"
+#include "common/rtxgi/ddgi/include/ProbeCommon.hlsl"
+#include "common/rtxgi/ddgi/include/DDGIRootConstants.hlsl"
 
 // -------- RESOURCE DECLARATIONS -----------------------------------------------------------------
 

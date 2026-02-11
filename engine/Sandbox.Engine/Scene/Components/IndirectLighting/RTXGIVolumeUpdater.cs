@@ -87,7 +87,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 		}
 
 		var irradianceSize = new Vector3Int( counts.x * 8, counts.y * 8, counts.z );
-		if ( IrradianceTexture is null || IrradianceTexture.Size != irradianceSize )
+		if ( IrradianceTexture is null || IrradianceTexture.Width != irradianceSize.x || IrradianceTexture.Height != irradianceSize.y || IrradianceTexture.Depth != irradianceSize.z )
 		{
 			IrradianceTexture?.Dispose();
 			IrradianceTexture = Texture.CreateVolume( irradianceSize.x, irradianceSize.y, irradianceSize.z, ImageFormat.RGBA16161616F )
@@ -97,7 +97,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 		}
 
 		var distanceSize = new Vector3Int( counts.x * 16, counts.y * 16, counts.z );
-		if ( DistanceTexture is null || DistanceTexture.Size != distanceSize )
+		if ( DistanceTexture is null || DistanceTexture.Width != distanceSize.x || DistanceTexture.Height != distanceSize.y || DistanceTexture.Depth != distanceSize.z )
 		{
 			DistanceTexture?.Dispose();
 			DistanceTexture = Texture.CreateVolume( distanceSize.x, distanceSize.y, distanceSize.z, ImageFormat.RGBA32323232F )
@@ -106,7 +106,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 				.Finish();
 		}
 
-		if ( ProbeDataTexture is null || ProbeDataTexture.Size != counts )
+		if ( ProbeDataTexture is null || ProbeDataTexture.Width != counts.x || ProbeDataTexture.Height != counts.y || ProbeDataTexture.Depth != counts.z )
 		{
 			ProbeDataTexture?.Dispose();
 			ProbeDataTexture = Texture.CreateVolume( counts.x, counts.y, counts.z, ImageFormat.RGBA32323232F )
@@ -117,7 +117,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 
 		if ( _descBuffer is null )
 		{
-			_descBuffer = new GpuBuffer<DDGIVolumeDescGPUPacked>( 1, GpuBufferUsage.Constant, "RTXGI_DescBuffer" );
+			_descBuffer = new GpuBuffer<DDGIVolumeDescGPUPacked>( 1, debugName: "RTXGI_DescBuffer" );
 		}
 	}
 
@@ -214,10 +214,6 @@ internal class RTXGIVolumeUpdater : IDisposable
 		attrs.Set( "ProbeData", ProbeDataTexture );
 		attrs.Set( "IrradianceTexture", IrradianceTexture );
 		attrs.Set( "DistanceTexture", DistanceTexture );
-
-		// Wrap the TLAS handle
-		var tlas = new RayTracingAccelerationStructure( accelerator.TopLevelAS );
-		attrs.Set( "SceneTLAS", tlas );
 
 		var counts = _volume.ProbeCounts;
 		ProbeTraceShader.DispatchRaysWithAttributes( attrs, 256, counts.x * counts.y, counts.z );

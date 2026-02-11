@@ -11,7 +11,7 @@
 #ifndef RTXGI_DDGI_IRRADIANCE_HLSL
 #define RTXGI_DDGI_IRRADIANCE_HLSL
 
-#include "include/ProbeCommon.hlsl"
+#include "common/rtxgi/ddgi/include/ProbeCommon.hlsl"
 
 struct DDGIVolumeResources
 {

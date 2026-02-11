@@ -11,11 +11,11 @@
 #ifndef RTXGI_DDGI_PROBE_COMMON_HLSL
 #define RTXGI_DDGI_PROBE_COMMON_HLSL
 
-#include "Common.hlsl"
-#include "ProbeDataCommon.hlsl"
-#include "ProbeRayCommon.hlsl"
-#include "ProbeIndexing.hlsl"
-#include "ProbeOctahedral.hlsl"
+#include "common/rtxgi/ddgi/include/Common.hlsl"
+#include "common/rtxgi/ddgi/include/ProbeDataCommon.hlsl"
+#include "common/rtxgi/ddgi/include/ProbeRayCommon.hlsl"
+#include "common/rtxgi/ddgi/include/ProbeIndexing.hlsl"
+#include "common/rtxgi/ddgi/include/ProbeOctahedral.hlsl"
 
 //------------------------------------------------------------------------
 // Probe World Position

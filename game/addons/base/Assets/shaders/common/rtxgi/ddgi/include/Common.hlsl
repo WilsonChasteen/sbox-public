@@ -11,11 +11,20 @@
 #ifndef RTXGI_DDGI_COMMON_HLSL
 #define RTXGI_DDGI_COMMON_HLSL
 
-#include "../../Common.hlsl"
-#include "../../Platform.hlsl"
-#include "../../../include/rtxgi/Defines.h"
-#include "../../../include/rtxgi/ddgi/DDGIRootConstants.h"
-#include "../../../include/rtxgi/ddgi/DDGIVolumeDescGPU.h"
+// The RTXGI C/C++ headers gate host-only includes behind this symbol.
+#ifndef HLSL
+#define HLSL 1
+#endif
+
+#ifndef RTXGI_COORDINATE_SYSTEM
+#define RTXGI_COORDINATE_SYSTEM 3
+#endif
+
+#include "common/rtxgi/Common.hlsl"
+#include "common/rtxgi/Platform.hlsl"
+#include "common/thirdparty/rtxgi/shaders/rtxgi/Defines.h"
+#include "common/thirdparty/rtxgi/shaders/rtxgi/ddgi/DDGIRootConstants.h"
+#include "common/DDGI/DDGIVolumeDescGPU.hlsl"
 
 //------------------------------------------------------------------------
 // Defines
