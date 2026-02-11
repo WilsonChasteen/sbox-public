@@ -104,7 +104,19 @@ internal partial class RenderPipeline
 		{
 			// Optimization: Skip bloom, but ensure the texture attribute is set to something valid (black)
 			// to avoid using a stale handle from a previous frame in later native passes.
-			view.GetRenderAttributesPtr().SetTextureValue( "QuarterResEffectsBloomInputTexture", Texture.Black.native, -1 );
+			var blackTexture = Texture.Black;
+			if ( blackTexture is not null && blackTexture.native.IsValid )
+			{
+				view.GetRenderAttributesPtr().SetTextureValue( "QuarterResEffectsBloomInputTexture", blackTexture.native, -1 );
+			}
+			else
+			{
+				var whiteTexture = Texture.White;
+				if ( whiteTexture is not null && whiteTexture.native.IsValid )
+				{
+					view.GetRenderAttributesPtr().SetTextureValue( "QuarterResEffectsBloomInputTexture", whiteTexture.native, -1 );
+				}
+			}
 		}
 
 		// Refraction stencil layer, used for filtering out depth on Framebuffer copies

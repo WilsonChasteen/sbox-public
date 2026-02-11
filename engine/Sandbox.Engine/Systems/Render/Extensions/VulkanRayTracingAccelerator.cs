@@ -106,8 +106,19 @@ internal class VulkanRayTracingAccelerator : RenderExtension
 	{
 		if ( _initialized || _failed ) return;
 
+		// Don't even try if the engine says it's not supported
+		if ( !g_pRenderDevice.IsRayTracingSupported() )
+		{
+			_failed = true;
+			return;
+		}
+
 		IntPtr device = Graphics.VulkanDevice;
-		if ( device == IntPtr.Zero ) return;
+		if ( device == IntPtr.Zero )
+		{
+			_failed = true;
+			return;
+		}
 
 		try
 		{
@@ -121,7 +132,8 @@ internal class VulkanRayTracingAccelerator : RenderExtension
 		}
 		catch ( Exception e )
 		{
-			Log.Warning( $"Failed to initialize Vulkan Ray Tracing functions: {e.Message}" );
+			// Log as info since many hardwares might not support the specific KHR extension even if they support RT in general
+			Log.Info( $"Vulkan Ray Tracing extension not found: {e.Message}" );
 			_failed = true;
 		}
 	}
@@ -135,6 +147,8 @@ internal class VulkanRayTracingAccelerator : RenderExtension
 
 	public override void AddLayersToView( RenderPipeline pipeline, ISceneView view, RenderViewport viewport )
 	{
+		if ( _failed ) return;
+
 		if ( !_initialized )
 		{
 			InitializeVulkanFunctions();

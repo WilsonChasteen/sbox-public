@@ -105,7 +105,8 @@ public partial class SceneObject : IHandle
 		_hadBloomFlag = Flags.HasFlag( Rendering.SceneObjectFlags.EffectsBloomLayer );
 		if ( _hadBloomFlag )
 		{
-			if ( World?.Scene is not null ) System.Threading.Interlocked.Increment( ref World.Scene._bloomObjectsCount );
+			var scene = World?.Scene;
+			if ( scene is not null ) System.Threading.Interlocked.Increment( ref scene._bloomObjectsCount );
 		}
 
 		//Log.Info( $"Created SceneObject: {GetType().Name}" );
@@ -115,7 +116,8 @@ public partial class SceneObject : IHandle
 	{
 		if ( _hadBloomFlag )
 		{
-			if ( World?.Scene is not null ) System.Threading.Interlocked.Decrement( ref World.Scene._bloomObjectsCount );
+			var scene = World?.Scene;
+			if ( scene is not null ) System.Threading.Interlocked.Decrement( ref scene._bloomObjectsCount );
 		}
 
 		lock ( World.InternalSceneObjects )
@@ -451,13 +453,17 @@ public partial class SceneObject : IHandle
 				if ( Object._hadBloomFlag != val )
 				{
 					Object._hadBloomFlag = val;
-					if ( val )
+					var scene = Object.World?.Scene;
+					if ( scene is not null )
 					{
-						if ( Object.World?.Scene is not null ) System.Threading.Interlocked.Increment( ref Object.World.Scene._bloomObjectsCount );
-					}
-					else
-					{
-						if ( Object.World?.Scene is not null ) System.Threading.Interlocked.Decrement( ref Object.World.Scene._bloomObjectsCount );
+						if ( val )
+						{
+							System.Threading.Interlocked.Increment( ref scene._bloomObjectsCount );
+						}
+						else
+						{
+							System.Threading.Interlocked.Decrement( ref scene._bloomObjectsCount );
+						}
 					}
 				}
 			}

@@ -3,5 +3,5 @@
 **Action:** Always prefer direct API access for cutting-edge features like Ray Tracing or Neural Shaders to ensure maximum performance and flexibility, while using the C# `RenderPipeline` hooks for high-level integration.
 
 ## 2025-02-10 - Conditional Bloom Optimization
-**Learning:** Global bloom passes often incur significant GPU overhead (RT allocations, downsampling, blur) even when no bloom-enabled objects are in the view. Tracking bloom usage at the scene level allows for early-outing the entire bloom pipeline block.
-**Action:** Implement similar tracking for other expensive global passes (SSAO, SSR) to save frame time in scenes where they are not contributing to the final image.
+**Learning:** Global bloom passes often incur significant GPU overhead (RT allocations, downsampling, blur) even when no bloom-enabled objects are in the view. Tracking bloom usage at the scene level allows for early-outing the entire bloom pipeline block. However, care must be taken to ensure all render attributes (like input textures for later passes) are set to sensible defaults when a pass is skipped, to prevent native code from using stale or invalid handles.
+**Action:** Implement similar tracking for other expensive global passes (SSAO, SSR). Always set skipped pass output attributes to safe defaults (e.g., Texture.Black).
