@@ -91,7 +91,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 
 	private void UpdateDazzle()
 	{
-		if ( Application.IsHeadless )
+		if ( Application.IsHeadless || Screen.Width < 1 || Screen.Height < 1 )
 			return;
 
 		var volumes = Scene.GetAll<IndirectLightVolume>()
@@ -244,7 +244,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		{
 			attrs.Set( "CascadeLevel", l );
 			var shift = l;
-			Vector3Int probeCounts = new Vector3Int( 16 >> shift, 16 >> shift, 16 >> shift );
+			Vector3Int probeCounts = new Vector3Int( Math.Max( 1, 16 >> shift ), Math.Max( 1, 16 >> shift ), Math.Max( 1, 16 >> shift ) );
 			CascadeTraceShader.DispatchWithAttributes( attrs, probeCounts.x, probeCounts.y, probeCounts.z );
 		}
 
@@ -253,7 +253,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		{
 			attrs.Set( "CascadeLevel", l );
 			var shift = l;
-			Vector3Int probeCounts = new Vector3Int( 16 >> shift, 16 >> shift, 16 >> shift );
+			Vector3Int probeCounts = new Vector3Int( Math.Max( 1, 16 >> shift ), Math.Max( 1, 16 >> shift ), Math.Max( 1, 16 >> shift ) );
 			CascadeMergeShader.DispatchWithAttributes( attrs, probeCounts.x, probeCounts.y, probeCounts.z );
 		}
 		RenderAttributes.Pool.Return( attrs );
