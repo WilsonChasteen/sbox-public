@@ -243,7 +243,8 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		for ( int l = 0; l < volume.CascadeLevels; l++ )
 		{
 			attrs.Set( "CascadeLevel", l );
-			Vector3Int probeCounts = new Vector3Int( 16, 16, 16 ) >> l;
+			var shift = l;
+			Vector3Int probeCounts = new Vector3Int( 16 >> shift, 16 >> shift, 16 >> shift );
 			CascadeTraceShader.DispatchWithAttributes( attrs, probeCounts.x, probeCounts.y, probeCounts.z );
 		}
 
@@ -251,7 +252,8 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		for ( int l = volume.CascadeLevels - 2; l >= 0; l-- )
 		{
 			attrs.Set( "CascadeLevel", l );
-			Vector3Int probeCounts = new Vector3Int( 16, 16, 16 ) >> l;
+			var shift = l;
+			Vector3Int probeCounts = new Vector3Int( 16 >> shift, 16 >> shift, 16 >> shift );
 			CascadeMergeShader.DispatchWithAttributes( attrs, probeCounts.x, probeCounts.y, probeCounts.z );
 		}
 		RenderAttributes.Pool.Return( attrs );
