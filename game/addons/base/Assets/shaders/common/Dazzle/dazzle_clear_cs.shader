@@ -11,6 +11,8 @@ MODES
 
 CS
 {
+	DynamicCombo( D_UINT, 0..1, Sys( ALL ) );
+
 	RWTexture3D<float> TargetTex < Attribute( "TargetTex" ); >;
 	RWTexture3D<uint> TargetTexU < Attribute( "TargetTexU" ); >;
 	int3 GridSize < Attribute( "GridSize" ); >;
@@ -18,7 +20,7 @@ CS
 	[numthreads( 8, 8, 8 )]
 	void MainCs( uint3 id : SV_DispatchThreadID )
 	{
-		if ( any( id >= GridSize ) ) return;
+		if ( any( id >= (uint3)GridSize ) ) return;
 
 		#if D_UINT
 			TargetTexU[id] = 0;

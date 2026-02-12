@@ -252,6 +252,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		for ( int l = volume.CascadeLevels - 2; l >= 0; l-- )
 		{
 			attrs.Set( "CascadeLevel", l );
+			attrs.Set( "BaseDirections", volume.BaseDirections );
 			var shift = l;
 			Vector3Int probeCounts = new Vector3Int( Math.Max( 1, 16 >> shift ), Math.Max( 1, 16 >> shift ), Math.Max( 1, 16 >> shift ) );
 			CascadeMergeShader.DispatchWithAttributes( attrs, probeCounts.x, probeCounts.y, probeCounts.z );
