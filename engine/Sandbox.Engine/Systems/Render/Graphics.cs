@@ -443,24 +443,4 @@ public static partial class Graphics
 
 		g_pRenderDevice.ForceFlushGPU( default );
 	}
-
-	/// <summary>
-	/// Returns the raw VkInstance handle if using Vulkan.
-	/// </summary>
-	public static IntPtr VulkanInstance => g_pRenderDevice.GetDeviceSpecificInfo( DeviceSpecificInfo_t.DSI_VULKAN_INSTANCE );
-
-	/// <summary>
-	/// Returns the raw VkPhysicalDevice handle if using Vulkan.
-	/// </summary>
-	public static IntPtr VulkanPhysicalDevice => g_pRenderDevice.GetDeviceSpecificInfo( DeviceSpecificInfo_t.DSI_VULKAN_PHYSICAL_DEVICE );
-
-	/// <summary>
-	/// Returns the raw VkDevice handle if using Vulkan.
-	/// </summary>
-	public static IntPtr VulkanDevice => g_pRenderDevice.GetDeviceSpecificInfo( DeviceSpecificInfo_t.DSI_VULKAN_DEVICE );
-
-	/// <summary>
-	/// Returns the raw VkQueue handle if using Vulkan.
-	/// </summary>
-	public static IntPtr VulkanQueue => g_pRenderDevice.GetDeviceSpecificInfo( DeviceSpecificInfo_t.DSI_VULKAN_QUEUE );
 }
