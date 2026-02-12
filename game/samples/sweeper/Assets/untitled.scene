@@ -8200,7 +8200,7 @@
       "Rotation": "0,0,0,1",
       "Scale": "2.111398,2.670007,2.096659",
       "Tags": "",
-      "Enabled": true,
+      "Enabled": false,
       "NetworkMode": 2,
       "NetworkFlags": 0,
       "NetworkOrphaned": 0,
@@ -8218,11 +8218,8 @@
           },
           "Contrast": 1,
           "DistanceTexture": null,
-          "InsideGeometry": "Relocate",
           "IrradianceTexture": null,
-          "MaxRelocationDistanceFraction": 0.75,
           "Method": "Lux",
-          "MinSurfaceDistanceFraction": 0.75,
           "NormalBias": 0,
           "OnComponentDestroy": null,
           "OnComponentDisabled": null,
@@ -8232,7 +8229,6 @@
           "OnComponentUpdate": null,
           "ProbeDensity": 15,
           "Realtime": true,
-          "RelocationRayCount": 48,
           "RelocationTexture": null
         }
       ],

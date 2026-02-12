@@ -18,7 +18,7 @@
 
 // -------- DEFINE VALIDATION ---------------------------------------------------------------------
 
-#include "include/validation/ProbeBlendingDefines.hlsl"
+#include "common/rtxgi/ddgi/include/validation/ProbeBlendingDefines.hlsl"
 
 // -------- REGISTER DECLARATIONS -----------------------------------------------------------------
 
@@ -60,8 +60,8 @@
 
 // -------- ROOT / PUSH CONSTANT DECLARATIONS -----------------------------------------------------
 
-#include "include/ProbeCommon.hlsl"
-#include "include/DDGIRootConstants.hlsl"
+#include "common/rtxgi/ddgi/include/ProbeCommon.hlsl"
+#include "common/rtxgi/ddgi/include/DDGIRootConstants.hlsl"
 
 // -------- RESOURCE DECLARATIONS -----------------------------------------------------------------
 
@@ -87,24 +87,24 @@
 
     // DDGIVolume constants structured buffer
     RTXGI_VK_BINDING(VOLUME_CONSTS_REGISTER, VOLUME_CONSTS_SPACE)
-    StructuredBuffer<DDGIVolumeDescGPUPacked> DDGIVolumes VOLUME_CONSTS_REG_DECL;
+    StructuredBuffer<DDGIVolumeDescGPUPacked> DDGIVolumes VOLUME_CONSTS_REG_DECL < Attribute( "DDGIVolumes" ); >;
 
     // DDGIVolume ray data (radiance and hit distances)
     RTXGI_VK_BINDING(RAY_DATA_REGISTER, RAY_DATA_SPACE)
-    RWTexture2DArray<float4> RayData RAY_DATA_REG_DECL;
+    RWTexture2DArray<float4> RayData RAY_DATA_REG_DECL < Attribute( "RayData" ); >;
 
     // DDGIVolume probe irradiance or distance arrays
     RTXGI_VK_BINDING(OUTPUT_REGISTER, OUTPUT_SPACE)
-    RWTexture2DArray<float4> Output OUTPUT_REG_DECL;
+    RWTexture2DArray<float4> Output OUTPUT_REG_DECL < Attribute( "Output" ); >;
 
     // Probe data (world-space offsets and classification states)
     RTXGI_VK_BINDING(PROBE_DATA_REGISTER, PROBE_DATA_SPACE)
-    RWTexture2DArray<float4> ProbeData PROBE_DATA_REG_DECL;
+    RWTexture2DArray<float4> ProbeData PROBE_DATA_REG_DECL < Attribute( "ProbeData" ); >;
 
 #if RTXGI_DDGI_BLEND_RADIANCE
     // Probe variability
     RTXGI_VK_BINDING(PROBE_VARIABILITY_REGISTER, PROBE_VARIABILITY_SPACE)
-    RWTexture2DArray<float4> ProbeVariability PROBE_VARIABILITY_REG_DECL;
+    RWTexture2DArray<float4> ProbeVariability PROBE_VARIABILITY_REG_DECL < Attribute( "ProbeVariability" ); >;
 #endif
 
 #endif // RTXGI_DDGI_BINDLESS_RESOURCES

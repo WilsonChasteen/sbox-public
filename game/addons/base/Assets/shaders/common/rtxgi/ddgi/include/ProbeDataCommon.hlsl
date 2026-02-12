@@ -11,7 +11,7 @@
 #ifndef RTXGI_DDGI_PROBE_DATA_COMMON_HLSL
 #define RTXGI_DDGI_PROBE_DATA_COMMON_HLSL
 
-#include "Common.hlsl"
+#include "common/rtxgi/ddgi/include/Common.hlsl"
 
 //------------------------------------------------------------------------
 // Probe Data Texture Write Helpers

@@ -11,7 +11,7 @@
 #ifndef RTXGI_DDGI_PROBE_OCTAHEDRAL_HLSL
 #define RTXGI_DDGI_PROBE_OCTAHEDRAL_HLSL
 
-#include "Common.hlsl"
+#include "common/rtxgi/ddgi/include/Common.hlsl"
 
 //------------------------------------------------------------------------
 // Probe Octahedral Indexing

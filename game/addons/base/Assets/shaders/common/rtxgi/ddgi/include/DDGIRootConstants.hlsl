@@ -8,7 +8,11 @@
 * license agreement from NVIDIA CORPORATION is strictly prohibited.
 */
 
-#include "../../../include/rtxgi/ddgi/DDGIRootConstants.h"
+#ifndef HLSL
+#define HLSL 1
+#endif
+
+#include "common/thirdparty/rtxgi/shaders/rtxgi/ddgi/DDGIRootConstants.h"
 
 #ifndef __spirv__ // D3D12
 
@@ -30,9 +34,11 @@
         #define CONSTS_REG_DECL : register(CONSTS_REGISTER, CONSTS_SPACE)
     #endif
 
-    // D3D12 allows multiple root constants across multiple root parameter slots, so this "constant buffer"
-    // (of root constants) can be declared here regardless of binding model (bindless or bound)
-    ConstantBuffer<DDGIRootConstants> DDGI CONSTS_REG_DECL;
+    // D3D12 allows multiple root constants across multiple root parameter slots.
+    cbuffer DDGIConstants CONSTS_REG_DECL
+    {
+        DDGIRootConstants DDGI;
+    };
 
     uint GetDDGIVolumeIndex() { return DDGI.volumeIndex; }
     uint GetDDGIVolumeConstantsIndex() { return DDGI.volumeConstantsIndex; }
@@ -102,7 +108,10 @@
 
     #elif RTXGI_PUSH_CONSTS_TYPE == RTXGI_PUSH_CONSTS_TYPE_SDK
 
-        [[vk::push_constant]] ConstantBuffer<DDGIRootConstants> DDGI;
+        cbuffer DDGIPushConstants
+        {
+            DDGIRootConstants DDGI;
+        };
         uint GetDDGIVolumeIndex() { return DDGI.volumeIndex; }
         uint3 GetReductionInputSize() { return uint3(DDGI.reductionInputSizeX, DDGI.reductionInputSizeY, DDGI.reductionInputSizeZ); }
 

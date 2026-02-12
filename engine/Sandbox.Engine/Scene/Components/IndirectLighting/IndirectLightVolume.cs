@@ -7,9 +7,10 @@ using System;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 
 /// <summary>
-/// Provides indirect lighting using a 3D probe grid.
+/// Provides indirect lighting using RTXGI-DDGI.
 /// Probes store irradiance and distance data in volume textures that can be sampled by shaders.
 /// </summary>
 [Expose]
@@ -32,33 +33,14 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		DDGI,
 
 		/// <summary>
-		/// Lux Global Illumination. High performance, software screen-space raytraced, real-time dynamic.
+		/// Lux Global Illumination. High performance, real-time dynamic.
 		/// </summary>
 		[Icon( "bolt" )]
 		Lux
 	}
 
 	/// <summary>
-	/// Behavior when a probe is detected inside geometry.
-	/// Relocation moves the probe out of geometry to reduce artifacts, while Deactivate simply disables the occluded probe, sealing leaks entirely.
-	/// </summary>
-	public enum InsideGeometryBehavior
-	{
-		/// <summary>
-		/// Probe is deactivated and won't contribute to lighting.
-		/// </summary>
-		[Icon( "block" )]
-		Deactivate,
-
-		/// <summary>
-		/// Probe is relocated to escape the geometry.
-		/// </summary>
-		[Icon( "open_with" )]
-		Relocate
-	}
-
-	/// <summary>
-	/// Per-probe data including position offset and active state.
+	/// CPU-side probe data indexed by flattened probe index.
 	/// </summary>
 	public sealed class Probe
 	{
@@ -76,13 +58,13 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	//
 
 	/// <summary>
-	/// The Global Illumination method to use.
+	/// The Global Illumination method to use. Both now use RTXGI-DDGI backend.
 	/// </summary>
 	[Property, MakeDirty]
 	public GIMethod Method { get; set; } = GIMethod.DDGI;
 
 	/// <summary>
-	/// If enabled, the volume will update in real-time.
+	/// If enabled, the volume will update in real-time using RTXGI.
 	/// </summary>
 	[Property, MakeDirty]
 	public bool Realtime { get; set; } = false;
@@ -132,12 +114,12 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	public Texture DistanceTexture { get; set; }
 
 	/// <summary>
-	/// Volume texture storing probe relocation offsets (XYZ = offset, W = active).
+	/// Volume texture storing probe data (offsets + classification).
 	/// </summary>
 	[Property, Hide]
 	public Texture RelocationTexture { get; set; }
 
-	private LuxProbeUpdater _luxUpdater;
+	private RTXGIVolumeUpdater _rtxgiUpdater;
 
 	/// <summary>
 	/// Cancellation source for the current bake operation.
@@ -148,82 +130,45 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	// Component Lifecycle
 	//
 
-		protected override void OnEnabled()
-		{
-			base.OnEnabled();
-			Transform.OnTransformChanged += OnDirty;
-	
-			LoadProbesFromRelocationTexture();
-			OnDirty();
-		}
-	
-		protected override void OnDisabled()
-		{
-			base.OnDisabled();
-			Transform.OnTransformChanged -= OnDirty;
-	
-			_bakeCts?.Cancel();
-			_bakeCts?.Dispose();
-			_bakeCts = null;
-	
-			_luxUpdater?.Dispose();
-			_luxUpdater = null;
-	
-			Scene.Get<DDGIVolumeSystem>()?.MarkDirty();
-		}
-	
-		void Component.IRenderThread.OnRenderStage( CameraComponent camera, Stage stage )
-		{
-			if ( stage != Stage.AfterOpaque )
-				return;
-	
-			if ( !Realtime || Method != GIMethod.Lux )
-				return;
-	
-			EnsureTexturesCreated();
-	
-			if ( _luxUpdater is null )
-				_luxUpdater = new LuxProbeUpdater( this );
-	
-			_luxUpdater.Update();
-		}
-		private void EnsureTexturesCreated()
+	protected override void OnEnabled()
 	{
-		var counts = ProbeCounts;
+		base.OnEnabled();
+		Transform.OnTransformChanged += OnDirty;
 
-		// Irradiance: 6x6 octahedral map + 2 pixel border per probe
-		const int irradianceOctSize = 8;
-		var irradianceSize = new Vector3Int( counts.x * irradianceOctSize, counts.y * irradianceOctSize, counts.z );
-		if ( !IrradianceTexture.IsValid() || IrradianceTexture.Width != irradianceSize.x || IrradianceTexture.Height != irradianceSize.y || IrradianceTexture.Depth != irradianceSize.z )
-		{
-			IrradianceTexture?.Dispose();
-			IrradianceTexture = Texture.CreateVolume( irradianceSize.x, irradianceSize.y, irradianceSize.z, ImageFormat.RGBA16161616F )
-				.WithName( "Irradiance" )
-				.WithUAVBinding()
-				.Finish();
-		}
+		_rtxgiUpdater = new RTXGIVolumeUpdater( this );
 
-		// Distance: 14x14 octahedral map + 2 pixel border per probe
-		const int distanceOctSize = 16;
-		var distanceSize = new Vector3Int( counts.x * distanceOctSize, counts.y * distanceOctSize, counts.z );
-		if ( !DistanceTexture.IsValid() || DistanceTexture.Width != distanceSize.x || DistanceTexture.Height != distanceSize.y || DistanceTexture.Depth != distanceSize.z )
-		{
-			DistanceTexture?.Dispose();
-			DistanceTexture = Texture.CreateVolume( distanceSize.x, distanceSize.y, distanceSize.z, ImageFormat.RGBA16161616F )
-				.WithName( "Distance" )
-				.WithUAVBinding()
-				.Finish();
-		}
+		// Restore textures from properties if they were loaded from disk
+		if ( IrradianceTexture.IsValid() ) _rtxgiUpdater.SetIrradianceTexture( IrradianceTexture );
+		if ( DistanceTexture.IsValid() ) _rtxgiUpdater.SetDistanceTexture( DistanceTexture );
+		if ( RelocationTexture.IsValid() ) _rtxgiUpdater.SetProbeDataTexture( RelocationTexture );
 
-		if ( !RelocationTexture.IsValid() || RelocationTexture.Width != counts.x || RelocationTexture.Height != counts.y || RelocationTexture.Depth != counts.z )
-		{
-			ComputeProbeRelocation();
-			RelocationTexture = GeneratedRelocationTexture;
-		}
+		OnDirty();
 	}
 
-	protected override void OnUpdate()
+	protected override void OnDisabled()
 	{
+		base.OnDisabled();
+		Transform.OnTransformChanged -= OnDirty;
+
+		_bakeCts?.Cancel();
+		_bakeCts?.Dispose();
+		_bakeCts = null;
+
+		_rtxgiUpdater?.Dispose();
+		_rtxgiUpdater = null;
+
+		Scene.Get<DDGIVolumeSystem>()?.MarkDirty();
+	}
+
+	void Component.IRenderThread.OnRenderStage( CameraComponent camera, Stage stage )
+	{
+		if ( stage != Stage.AfterOpaque )
+			return;
+
+		if ( _rtxgiUpdater is null )
+			_rtxgiUpdater = new RTXGIVolumeUpdater( this );
+
+		_rtxgiUpdater.Update();
 	}
 
 	protected override void OnDirty()
@@ -237,7 +182,7 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	//
 
 	/// <summary>
-	/// Starts the probe baking process to capture lighting into the volume textures.
+	/// Starts the probe baking process to capture lighting into the volume textures using RTXGI.
 	/// </summary>
 	[Button( "Bake", "lightbulb" )]
 	public async Task BakeProbes( CancellationToken ct = default )
@@ -245,117 +190,36 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		if ( Scene?.SceneWorld is null )
 			return;
 
-		// Cancel any existing bake operation
 		_bakeCts?.Cancel();
 		_bakeCts?.Dispose();
 		_bakeCts = new CancellationTokenSource();
 
-		// Not needed if GPU RT
-		ComputeProbeRelocation();
-		RelocationTexture = GeneratedRelocationTexture;
-
-		using var updater = new DDGIProbeUpdaterCubemapper( this );
-
-		// Update for preview
-		IrradianceTexture = updater.GeneratedIrradianceTexture;
-		DistanceTexture = updater.GeneratedDistanceTexture;
-		Scene.Get<DDGIVolumeSystem>()?.MarkDirty();
+		if ( _rtxgiUpdater is null )
+			_rtxgiUpdater = new RTXGIVolumeUpdater( this );
 
 		using var linkedCt = CancellationTokenSource.CreateLinkedTokenSource( ct, _bakeCts.Token, GameObject.EnabledToken );
 
-		if ( !await updater.RunAsync( linkedCt.Token ) )
-		{
-			IrradianceTexture = default;
-			DistanceTexture = default;
-			RelocationTexture = default;
-		}
-		else
-		{
-			// Make sure all GPU work is done before saving textures
-			Graphics.FlushGPU();
+		await _rtxgiUpdater.Bake( linkedCt.Token );
 
-			IrradianceTexture = SaveTexture( updater.GeneratedIrradianceTexture, "Irradiance" );
-			DistanceTexture = SaveTexture( updater.GeneratedDistanceTexture, "Distance", ImageFormat.RG1616F ); // BC6H ideally, but block compression fucks precision too much
-			RelocationTexture = SaveTexture( GeneratedRelocationTexture, "Relocation", ImageFormat.RGBA16161616F );
+		// Save textures to disk for persistence
+		if ( Application.IsEditor )
+		{
+			Graphics.FlushGPU();
+			IrradianceTexture = SaveTexture( _rtxgiUpdater.IrradianceTexture, "Irradiance" );
+			DistanceTexture = SaveTexture( _rtxgiUpdater.DistanceTexture, "Distance", ImageFormat.RGBA32323232F );
+			RelocationTexture = SaveTexture( _rtxgiUpdater.ProbeDataTexture, "Relocation", ImageFormat.RGBA32323232F );
 		}
 
 		Scene.Get<DDGIVolumeSystem>()?.MarkDirty();
 	}
 
-	/// <summary>
-	/// Automatically sizes the volume to encompass all scene geometry.
-	/// </summary>
-	[Button( "Fit to Scene Bounds", "fullscreen" )]
-	public void ExtendToSceneBounds()
-	{
-		if ( Scene is null )
-			return;
-
-		WorldScale = 1;
-		WorldRotation = Rotation.Identity;
-		var sceneBounds = BBox.FromPositionAndSize( WorldPosition );
-
-		foreach ( var renderer in Scene.GetAll<Renderer>() )
-		{
-			if ( renderer is not IHasBounds bounds )
-				continue;
-			sceneBounds = sceneBounds.AddBBox( bounds.LocalBounds.Transform( renderer.WorldTransform ) );
-		}
-		foreach ( var terrain in Scene.GetAll<Terrain>() )
-		{
-			var collision = terrain.EnableCollision; // isnt great but poking around in the heightmap is worse
-			terrain.EnableCollision = true;
-			sceneBounds = sceneBounds.AddBBox( terrain.GetWorldBounds() );
-			if ( !collision )
-				terrain.EnableCollision = false;
-		}
-		foreach ( var mesh in Scene.GetAll<MeshComponent>() )
-		{
-			var model = mesh.Model;
-			if ( model is null )
-				continue;
-			sceneBounds = sceneBounds.AddBBox( model.RenderBounds.Transform( mesh.WorldTransform ) );
-		}
-		sceneBounds = sceneBounds.Translate( -WorldPosition ).Grow( 16 );
-
-		Bounds = sceneBounds;
-	}
-
-
-	//
-	// Gizmos
-	//
-
-	protected override void DrawGizmos()
-	{
-		if ( !Gizmo.IsSelected )
-			return;
-
-		var bounds = Bounds;
-		Gizmo.Control.BoundingBox( "Bounds", bounds, out bounds );
-		Gizmo.Draw.LineBBox( bounds );
-		Bounds = bounds;
-
-		// Use gizmo pooling so it follows gizmo visibility rules (hidden when gizmos disabled, not in cubemaps)
-		var debugGrid = Gizmo.Active.FindOrCreate<LPVDebugGridObject>( "lpv-grid", () => new( Gizmo.World ) );
-
-		debugGrid.UpdateGrid( WorldTransform, Bounds, ProbeCounts, 10, Probes );
-	}
-
-
-	/// <summary>
-	/// Saves texture to disk and reloads it.
-	/// </summary>
 	private Texture SaveTexture( Texture source, string suffix, ImageFormat? format = null )
 	{
-		if ( source is null || source.IsError )
-			return source;
-
-		if ( Scene.Editor is null )
-			return source;
+		if ( source is null || source.IsError ) return source;
+		if ( Scene.Editor is null ) return source;
 
 		var sceneFolder = Scene.Editor.GetSceneFolder();
-		var safeName = (GameObject?.Name ?? "DDGIVolume").Replace( " ", "_" ).ToLower();
+		var safeName = (GameObject?.Name ?? "RTXGIVolume").Replace( " ", "_" ).ToLower();
 		var filename = $"/ddgi/{safeName}_{suffix}_{Id}.vtex_c";
 
 		var vtexBytes = source.SaveToVtex( format );
@@ -364,110 +228,102 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		var saved = Texture.Load( path );
 		if ( saved is not null && !saved.IsError )
 		{
-			source.Dispose();
 			return saved;
 		}
-
 		return source;
 	}
 
-	//
-	// GPU Data
-	//
+	[Button( "Fit to Scene Bounds", "fullscreen" )]
+	public void ExtendToSceneBounds()
+	{
+		if ( Scene is null ) return;
+		WorldScale = 1;
+		WorldRotation = Rotation.Identity;
+		var sceneBounds = BBox.FromPositionAndSize( WorldPosition );
 
-	/// <summary>
-	/// Builds GPU-ready structure for shader consumption.
-	/// </summary>
-	internal bool BuildData( out DDGIVolumeGpuData data )
+		foreach ( var renderer in Scene.GetAll<Renderer>() )
+		{
+			if ( renderer is not IHasBounds bounds ) continue;
+			sceneBounds = sceneBounds.AddBBox( bounds.LocalBounds.Transform( renderer.WorldTransform ) );
+		}
+		sceneBounds = sceneBounds.Translate( -WorldPosition ).Grow( 16 );
+		Bounds = sceneBounds;
+	}
+
+	protected override void DrawGizmos()
+	{
+		if ( !Gizmo.IsSelected ) return;
+		var bounds = Bounds;
+		Gizmo.Control.BoundingBox( "Bounds", bounds, out bounds );
+		Gizmo.Draw.LineBBox( bounds );
+		Bounds = bounds;
+
+		var debugGrid = Gizmo.Active.FindOrCreate<LPVDebugGridObject>( "lpv-grid", () => new( Gizmo.World ) );
+		debugGrid.UpdateGrid( WorldTransform, Bounds, ProbeCounts, 10, Probes );
+	}
+
+	internal bool BuildData( out RTXGIVolumeUpdater.DDGIVolumeDescGPUPacked data )
 	{
 		data = default;
+		var irr = IsCompatibleArrayTexture( IrradianceTexture ) ? IrradianceTexture : _rtxgiUpdater?.IrradianceTexture;
+		if ( irr is null || !irr.IsValid() ) return false;
 
-		if ( !IrradianceTexture.IsValid() || !DistanceTexture.IsValid() || !RelocationTexture.IsValid() )
-			return false;
+		var gpuDesc = new RTXGIVolumeUpdater.DDGIVolumeDescGPU();
+		gpuDesc.origin = WorldPosition;
+		gpuDesc.probeMaxRayDistance = 10000.0f;
+		gpuDesc.rotation = WorldRotation;
+		gpuDesc.probeSpacing = ComputeSpacing( ProbeCounts );
+		gpuDesc.probeCounts = ProbeCounts;
+		gpuDesc.probeNumRays = 256;
+		gpuDesc.probeNumIrradianceTexels = 8;
+		gpuDesc.probeNumDistanceTexels = 16;
+		gpuDesc.probeHysteresis = 0.97f;
+		gpuDesc.probeNormalBias = NormalBias;
+		gpuDesc.probeViewBias = 0.1f;
+		gpuDesc.probeIrradianceEncodingGamma = 5.0f;
+		gpuDesc.probeIrradianceThreshold = 0.25f;
+		gpuDesc.probeBrightnessThreshold = 2.0f;
+		gpuDesc.probeRandomRayBackfaceThreshold = 0.1f;
+		gpuDesc.probeDistanceExponent = 7.0f;
+		gpuDesc.probeRelocationEnabled = true;
+		gpuDesc.probeClassificationEnabled = true;
+		gpuDesc.probeMinFrontfaceDistance = 1.0f;
+		gpuDesc.probeBackfaceThreshold = 0.1f;
 
-		var probeCounts = ProbeCounts;
-		var spacing = ComputeSpacing( probeCounts );
+		data.Pack( gpuDesc );
 
-		data = new DDGIVolumeGpuData
-		{
-			WorldToProbe = Matrix.FromTransform( WorldTransform ).Inverted,
-			ProbeToWorld = Matrix.FromTransform( WorldTransform ),
-			BBoxMin = Bounds.Mins,
-			BBoxMax = Bounds.Maxs,
-			NormalBias = NormalBias,
-			ProbeSpacing = spacing,
-			BlendDistance = 0.0f,
-			ReciprocalSpacing = new(
-				spacing.x > 0.0f ? 1.0f / spacing.x : 0.0f,
-				spacing.y > 0.0f ? 1.0f / spacing.y : 0.0f,
-				spacing.z > 0.0f ? 1.0f / spacing.z : 0.0f
-			),
-			ReciprocalCountsMinusOne = new(
-				probeCounts.x > 1 ? 1.0f / (probeCounts.x - 1) : 0.0f,
-				probeCounts.y > 1 ? 1.0f / (probeCounts.y - 1) : 0.0f,
-				probeCounts.z > 1 ? 1.0f / (probeCounts.z - 1) : 0.0f
-			),
-			ProbeCounts = probeCounts,
-			RelocationTextureIndex = RelocationTexture?.Index ?? -1,
-			IrradianceTextureIndex = IrradianceTexture?.Index ?? -1,
-			DistanceTextureIndex = DistanceTexture?.Index ?? -1,
-			Method = (int)Method
-		};
+		var dist = IsCompatibleArrayTexture( DistanceTexture ) ? DistanceTexture : _rtxgiUpdater?.DistanceTexture;
+		var dataTex = IsCompatibleArrayTexture( RelocationTexture ) ? RelocationTexture : _rtxgiUpdater?.ProbeDataTexture;
+
+		data.data12 = new Vector4( irr.Index, dist?.Index ?? -1, dataTex?.Index ?? -1, (int)Method );
 
 		return true;
 	}
 
-	[StructLayout( LayoutKind.Sequential, Pack = 0 )]
-	internal struct DDGIVolumeGpuData
+	private static bool IsCompatibleArrayTexture( Texture texture )
 	{
-		public Matrix WorldToProbe;
-		public Matrix ProbeToWorld;
-		public Vector3 BBoxMin;
-		public Vector3 BBoxMax;
-		public float NormalBias;
-		public Vector3 ProbeSpacing;
-		public float BlendDistance;
-		public Vector3 ReciprocalSpacing;
-		public int IrradianceTextureIndex;
-		public Vector3 ReciprocalCountsMinusOne;
-		public int DistanceTextureIndex;
-		public Vector3Int ProbeCounts;
-		public int RelocationTextureIndex;
-		public int Method;
+		if ( texture is null || !texture.IsValid() )
+			return false;
+
+		var flags = texture.Desc.m_nFlags;
+		return flags.HasFlag( NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_TEXTURE_ARRAY )
+			&& !flags.HasFlag( NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_VOLUME_TEXTURE );
 	}
 
-	//
-	// Probe Grid Calculations
-	//
-
-	/// <summary>
-	/// Calculates probe count along each axis based on volume size and density.
-	/// </summary>
 	private Vector3Int ComputeProbeCounts()
 	{
 		const float densityScale = 1.0f / 1024.0f;
 		const int minProbes = 4;
 		const int maxProbes = 40;
-
 		var size = Bounds.Size;
 		var density = ProbeDensity * densityScale;
-
 		return new Vector3Int(
-			ComputeProbeCountForAxis( size.x, density ),
-			ComputeProbeCountForAxis( size.y, density ),
-			ComputeProbeCountForAxis( size.z, density )
+			Math.Clamp( (int)MathF.Ceiling( size.x * density ) + 1, minProbes, maxProbes ),
+			Math.Clamp( (int)MathF.Ceiling( size.y * density ) + 1, minProbes, maxProbes ),
+			Math.Clamp( (int)MathF.Ceiling( size.z * density ) + 1, minProbes, maxProbes )
 		);
-
-		static int ComputeProbeCountForAxis( float axisSize, float density )
-		{
-			var count = (int)MathF.Ceiling( axisSize * density ) + 1;
-			return Math.Clamp( count, minProbes, maxProbes );
-		}
 	}
 
-	/// <summary>
-	/// Calculates spacing between probes based on volume size and probe counts.
-	/// </summary>
 	internal Vector3 ComputeSpacing( Vector3Int counts )
 	{
 		var size = Bounds.Size;
@@ -478,58 +334,27 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		);
 	}
 
-	/// <summary>
-	/// Gets the local-space position of a probe at the given grid index.
-	/// </summary>
 	internal Vector3 GetProbeLocalPosition( Vector3Int index )
 	{
 		var spacing = ComputeSpacing( ProbeCounts );
 		return Bounds.Mins + index * spacing;
 	}
 
-	/// <summary>
-	/// Gets the world-space position of a probe at the given grid index.
-	/// </summary>
 	internal Vector3 GetProbeWorldPosition( Vector3Int index )
 	{
 		return WorldTransform.PointToWorld( GetProbeLocalPosition( index ) );
 	}
 
-	/// <summary>
-	/// Gets the relocated world position of a probe.
-	/// </summary>
 	internal Vector3 GetRelocatedProbeWorldPosition( Vector3Int index )
 	{
-		var basePosition = GetProbeWorldPosition( index );
-		var probe = GetProbe( index );
-		return basePosition + (probe?.Offset ?? Vector3.Zero);
-	}
-
-	/// <summary>
-	/// Gets probe data at the given grid index.
-	/// </summary>
-	internal Probe GetProbe( Vector3Int index )
-	{
-		if ( Probes is null )
-			return null;
-
-		var counts = ProbeCounts;
-		var flatIndex = index.x + index.y * counts.x + index.z * counts.x * counts.y;
-
-		if ( flatIndex < 0 || flatIndex >= Probes.Length )
-			return null;
-
-		return Probes[flatIndex];
+		return GetProbeWorldPosition( index );
 	}
 
 	[Menu( "Editor", "Scene/Bake Indirect Light Volumes", "snowing", Priority = 1100 )]
 	public static async Task BakeAll()
 	{
-		if ( Application.Editor is null )
-			return;
-
+		if ( Application.Editor is null ) return;
 		var components = Application.Editor.Scene.GetAll<IndirectLightVolume>().ToArray();
-
 		await Application.Editor.ForEachAsync( components, "Baking Indirect Light Volumes in Scene", ( x, ct ) => x.BakeProbes( ct ) );
 	}
 }

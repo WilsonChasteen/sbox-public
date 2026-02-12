@@ -5,13 +5,12 @@ using System.Collections.Generic;
 using System.Linq;
 
 /// <summary>
-/// Maintains GPU data for all <see cref="IndirectLightVolume"/> instances in a scene.
+/// Maintains GPU data for all <see cref="IndirectLightVolume"/> instances in a scene using RTXGI.
 /// Collects, sorts, and uploads volume parameters to the renderer.
 /// </summary>
-
 sealed class DDGIVolumeSystem : GameObjectSystem<DDGIVolumeSystem>
 {
-	private GpuBuffer<IndirectLightVolume.DDGIVolumeGpuData> GpuBuffer;
+	private GpuBuffer<RTXGIVolumeUpdater.DDGIVolumeDescGPUPacked> GpuBuffer;
 	private bool _dirty = true;
 
 	public DDGIVolumeSystem( Scene scene ) : base( scene )
@@ -24,8 +23,6 @@ sealed class DDGIVolumeSystem : GameObjectSystem<DDGIVolumeSystem>
 		ReleaseBuffer();
 
 		Scene?.RenderAttributes?.Set( "DDGI_VolumeCount", 0 );
-		//Scene?.RenderAttributes?.Set( "DDGI_Volumes", (GpuBuffer)null );
-
 		base.Dispose();
 	}
 
@@ -49,7 +46,7 @@ sealed class DDGIVolumeSystem : GameObjectSystem<DDGIVolumeSystem>
 			.Where( volume => volume is { Active: true } )
 			.OrderBy( volume => volume.Bounds.Volume );
 
-		var volumeData = new List<IndirectLightVolume.DDGIVolumeGpuData>();
+		var volumeData = new List<RTXGIVolumeUpdater.DDGIVolumeDescGPUPacked>();
 		foreach ( var volume in orderedVolumes )
 		{
 			if ( volume.Enabled && volume.BuildData( out var data ) )
@@ -67,10 +64,8 @@ sealed class DDGIVolumeSystem : GameObjectSystem<DDGIVolumeSystem>
 			return;
 		}
 
-		// No valid volumes: clear renderer attributes to avoid stale data.
 		ReleaseBuffer();
 		Scene.RenderAttributes.Set( "DDGI_VolumeCount", 0 );
-		//Scene.RenderAttributes.Set( "DDGI_Volumes", (GpuBuffer)null );
 	}
 
 	private void EnsureBufferCapacity( int count )
@@ -79,7 +74,7 @@ sealed class DDGIVolumeSystem : GameObjectSystem<DDGIVolumeSystem>
 			return;
 
 		ReleaseBuffer();
-		GpuBuffer = new GpuBuffer<IndirectLightVolume.DDGIVolumeGpuData>( Math.Max( count, 1 ), debugName: "DDGI_Volumes" );
+		GpuBuffer = new GpuBuffer<RTXGIVolumeUpdater.DDGIVolumeDescGPUPacked>( Math.Max( count, 1 ), debugName: "DDGI_Volumes" );
 	}
 
 	private void ReleaseBuffer()

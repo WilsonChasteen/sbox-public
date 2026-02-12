@@ -36,6 +36,17 @@ internal static class RenderExtensions
 	}
 
 	/// <summary>
+	/// Returns the first registered extension of the specified type.
+	/// </summary>
+	public static T Get<T>() where T : IRenderExtension
+	{
+		lock ( _extensions )
+		{
+			return _extensions.OfType<T>().FirstOrDefault();
+		}
+	}
+
+	/// <summary>
 	/// Unregister a render extension.
 	/// </summary>
 	public static void Unregister( IRenderExtension extension )
