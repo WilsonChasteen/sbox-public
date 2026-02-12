@@ -19,7 +19,6 @@ COMMON
 	#define CUSTOM_MATERIAL_INPUTS
 	#include "common/shared.hlsl"
 	#include "common/Bindless.hlsl"
-	#include "common/vertex.hlsl"
 
 	RWTexture3D<float> VoxelGrid < Attribute( "VoxelGrid" ); >;
 	float3 VolumeMin < Attribute( "VolumeMin" ); >;
@@ -43,8 +42,8 @@ VS
 	PixelInput MainVs( VertexInput i )
 	{
 		PixelInput o;
-		o.WorldPosition = mul( g_matLocalToWorld, float4( i.Position, 1.0 ) ).xyz;
-		o.PixelPosition = mul( g_matWorldToProjection, float4( o.WorldPosition, 1.0 ) );
+		o.WorldPosition = PositionLocalToWorld( i.Position );
+		o.PixelPosition = PositionWorldToProjection( o.WorldPosition );
 		return o;
 	}
 }

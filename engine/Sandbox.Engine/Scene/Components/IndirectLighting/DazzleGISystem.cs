@@ -3,6 +3,7 @@ namespace Sandbox;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using Sandbox.Rendering;
 
 [StructLayout( LayoutKind.Sequential )]
