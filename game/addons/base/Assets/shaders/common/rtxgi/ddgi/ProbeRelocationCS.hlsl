@@ -77,15 +77,15 @@
 
     // DDGIVolume constants structured buffer
     RTXGI_VK_BINDING(VOLUME_CONSTS_REGISTER, VOLUME_CONSTS_SPACE)
-    StructuredBuffer<DDGIVolumeDescGPUPacked> DDGIVolumes VOLUME_CONSTS_REG_DECL;
+    StructuredBuffer<DDGIVolumeDescGPUPacked> DDGIVolumes VOLUME_CONSTS_REG_DECL < Attribute( "DDGIVolumes" ); >;
 
     // DDGIVolume ray data (radiance and hit distances)
     RTXGI_VK_BINDING(RAY_DATA_REGISTER, RAY_DATA_SPACE)
-    RWTexture2DArray<float4> RayData RAY_DATA_REG_DECL;
+    RWTexture2DArray<float4> RayData RAY_DATA_REG_DECL < Attribute( "RayData" ); >;
 
     // DDGIVolume Probe data (world-space offsets and classification states)
     RTXGI_VK_BINDING(PROBE_DATA_REGISTER, PROBE_DATA_SPACE)
-    RWTexture2DArray<float4> ProbeData PROBE_DATA_REG_DECL;
+    RWTexture2DArray<float4> ProbeData PROBE_DATA_REG_DECL < Attribute( "ProbeData" ); >;
 
 #endif // RTXGI_DDGI_BINDLESS_RESOURCES
 

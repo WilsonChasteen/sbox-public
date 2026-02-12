@@ -1,4 +1,5 @@
 using Sandbox.Rendering;
+using Sandbox.Tasks;
 using System.Threading;
 using System.Runtime.InteropServices;
 using System;
@@ -23,7 +24,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 	private static ComputeShader ClassifyShader = new ComputeShader( "common/rtxgi/rtxgi_classify" );
 	private static ComputeShader FillRayDataShader = new ComputeShader( "common/rtxgi/rtxgi_fill_raydata" );
 	private static ComputeShader DepthCopyShader = new ComputeShader( "common/rtxgi/rtxgi_depth_copy" );
-	private static RayTracingShader ProbeTraceShader = new RayTracingShader( "common/rtxgi/rtxgi_probe_trace" );
+	private static RayTracingShader ProbeTraceShader;
 
 	// Textures
 	public Texture RayDataTexture { get; private set; }
@@ -40,6 +41,10 @@ internal class RTXGIVolumeUpdater : IDisposable
 	private bool _isUsingFallback = false;
 	private int _renderedFace = 0;
 	private int _renderedIndex = -1;
+	private int _queuedFallbackProbeUpdates = 0;
+	private int _fallbackProbeDrainQueued = 0;
+	private int _disposed = 0;
+	private bool _rayTracingUnavailable = false;
 
 	// Constant Buffers
 	private GpuBuffer<DDGIVolumeDescGPUPacked> _descBuffer;
@@ -65,9 +70,33 @@ internal class RTXGIVolumeUpdater : IDisposable
 		}
 	}
 
-	public void SetIrradianceTexture( Texture tex ) => IrradianceTexture = tex;
-	public void SetDistanceTexture( Texture tex ) => DistanceTexture = tex;
-	public void SetProbeDataTexture( Texture tex ) => ProbeDataTexture = tex;
+	public void SetIrradianceTexture( Texture tex )
+	{
+		if ( IsCompatibleArrayTexture( tex ) )
+			IrradianceTexture = tex;
+	}
+
+	public void SetDistanceTexture( Texture tex )
+	{
+		if ( IsCompatibleArrayTexture( tex ) )
+			DistanceTexture = tex;
+	}
+
+	public void SetProbeDataTexture( Texture tex )
+	{
+		if ( IsCompatibleArrayTexture( tex ) )
+			ProbeDataTexture = tex;
+	}
+
+	private static bool IsCompatibleArrayTexture( Texture tex )
+	{
+		if ( tex is null || !tex.IsValid() )
+			return false;
+
+		var flags = tex.Desc.m_nFlags;
+		return flags.HasFlag( NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_TEXTURE_ARRAY )
+			&& !flags.HasFlag( NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_VOLUME_TEXTURE );
+	}
 
 	private void EnsureResources()
 	{
@@ -80,7 +109,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 		if ( RayDataTexture is null || RayDataTexture.Width != numRays || RayDataTexture.Height != probesPerPlane || RayDataTexture.Depth != numPlanes )
 		{
 			RayDataTexture?.Dispose();
-			RayDataTexture = Texture.CreateVolume( numRays, probesPerPlane, numPlanes, ImageFormat.RGBA32323232F )
+			RayDataTexture = Texture.CreateArray( numRays, probesPerPlane, numPlanes, ImageFormat.RGBA32323232F )
 				.WithName( "RTXGI_RayData" )
 				.WithUAVBinding()
 				.Finish();
@@ -90,7 +119,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 		if ( IrradianceTexture is null || IrradianceTexture.Width != irradianceSize.x || IrradianceTexture.Height != irradianceSize.y || IrradianceTexture.Depth != irradianceSize.z )
 		{
 			IrradianceTexture?.Dispose();
-			IrradianceTexture = Texture.CreateVolume( irradianceSize.x, irradianceSize.y, irradianceSize.z, ImageFormat.RGBA16161616F )
+			IrradianceTexture = Texture.CreateArray( irradianceSize.x, irradianceSize.y, irradianceSize.z, ImageFormat.RGBA16161616F )
 				.WithName( "RTXGI_Irradiance" )
 				.WithUAVBinding()
 				.Finish();
@@ -100,7 +129,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 		if ( DistanceTexture is null || DistanceTexture.Width != distanceSize.x || DistanceTexture.Height != distanceSize.y || DistanceTexture.Depth != distanceSize.z )
 		{
 			DistanceTexture?.Dispose();
-			DistanceTexture = Texture.CreateVolume( distanceSize.x, distanceSize.y, distanceSize.z, ImageFormat.RGBA32323232F )
+			DistanceTexture = Texture.CreateArray( distanceSize.x, distanceSize.y, distanceSize.z, ImageFormat.RGBA32323232F )
 				.WithName( "RTXGI_Distance" )
 				.WithUAVBinding()
 				.Finish();
@@ -109,7 +138,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 		if ( ProbeDataTexture is null || ProbeDataTexture.Width != counts.x || ProbeDataTexture.Height != counts.y || ProbeDataTexture.Depth != counts.z )
 		{
 			ProbeDataTexture?.Dispose();
-			ProbeDataTexture = Texture.CreateVolume( counts.x, counts.y, counts.z, ImageFormat.RGBA32323232F )
+			ProbeDataTexture = Texture.CreateArray( counts.x, counts.y, counts.z, ImageFormat.RGBA32323232F )
 				.WithName( "RTXGI_ProbeData" )
 				.WithUAVBinding()
 				.Finish();
@@ -150,6 +179,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 
 		const int cubemapSize = 64;
 		_captureTexture = Texture.CreateCube( cubemapSize, cubemapSize )
+								.AsRenderTarget()
 								.WithUAVBinding()
 								.WithFormat( ImageFormat.RGBA16161616F )
 								.Finish();
@@ -174,6 +204,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 
 	public void Update()
 	{
+		if ( Volatile.Read( ref _disposed ) != 0 ) return;
 		if ( !Graphics.IsActive ) return;
 
 		UpdateConstants();
@@ -182,11 +213,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 		{
 			if ( _isUsingFallback )
 			{
-				for ( int i = 0; i < 2; i++ )
-				{
-					UpdateProbeFallback( _nextProbeToUpdate );
-					_nextProbeToUpdate = ( _nextProbeToUpdate + 1 ) % ( _volume.ProbeCounts.x * _volume.ProbeCounts.y * _volume.ProbeCounts.z );
-				}
+				QueueFallbackProbeUpdates( 2 );
 			}
 			else
 			{
@@ -196,7 +223,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 
 		DispatchBlending();
 
-		if ( _volume.Realtime )
+		if ( _volume.Realtime && !_isUsingFallback )
 		{
 			DispatchRelocation();
 			DispatchClassification();
@@ -205,8 +232,20 @@ internal class RTXGIVolumeUpdater : IDisposable
 
 	private void UpdateProbeHardwareRT()
 	{
+		if ( _rayTracingUnavailable )
+			return;
+
 		var accelerator = RenderExtensions.Get<VulkanRayTracingAccelerator>();
 		if ( accelerator == null || accelerator.TopLevelAS == 0 ) return;
+
+		ProbeTraceShader ??= TryCreateProbeTraceShader();
+		if ( ProbeTraceShader is null )
+		{
+			_rayTracingUnavailable = true;
+			_isUsingFallback = true;
+			InitializeFallback();
+			return;
+		}
 
 		var attrs = RenderAttributes.Pool.Get();
 		attrs.Set( "DDGIVolumes", _descBuffer );
@@ -221,8 +260,24 @@ internal class RTXGIVolumeUpdater : IDisposable
 		RenderAttributes.Pool.Return( attrs );
 	}
 
+	private static RayTracingShader TryCreateProbeTraceShader()
+	{
+		try
+		{
+			return new RayTracingShader( "common/rtxgi/rtxgi_probe_trace" );
+		}
+		catch ( Exception e )
+		{
+			Log.Warning( e, "RTXGI: Failed to load probe trace shader, falling back to cubemap capture." );
+			return null;
+		}
+	}
+
 	private void UpdateProbeFallback( int probeIndex )
 	{
+		if ( _captureCamera is null || _captureTexture is null || !_captureTexture.IsValid() )
+			return;
+
 		var counts = _volume.ProbeCounts;
 		var z = probeIndex / (counts.x * counts.y);
 		var rem = probeIndex % (counts.x * counts.y);
@@ -234,6 +289,66 @@ internal class RTXGIVolumeUpdater : IDisposable
 		_renderedIndex = probeIndex;
 		_captureCamera.Position = _volume.GetRelocatedProbeWorldPosition( probeCoord );
 		_captureCamera.RenderToCubeTexture( _captureTexture );
+	}
+
+	private void QueueFallbackProbeUpdates( int count )
+	{
+		if ( Volatile.Read( ref _disposed ) != 0 )
+			return;
+
+		if ( count > 0 )
+		{
+			Interlocked.Add( ref _queuedFallbackProbeUpdates, count );
+		}
+
+		if ( Interlocked.Exchange( ref _fallbackProbeDrainQueued, 1 ) != 0 )
+			return;
+
+		var mainThreadContext = SyncContext.MainThread;
+		if ( mainThreadContext is null )
+		{
+			Interlocked.Exchange( ref _fallbackProbeDrainQueued, 0 );
+			return;
+		}
+
+		mainThreadContext.Post( _ => DrainFallbackProbeUpdates(), null );
+	}
+
+	private void DrainFallbackProbeUpdates()
+	{
+		Interlocked.Exchange( ref _fallbackProbeDrainQueued, 0 );
+
+		if ( Volatile.Read( ref _disposed ) != 0 )
+			return;
+
+		// We can be called while actively rendering if this was posted late in-frame.
+		// Re-queue and wait for the next main-thread queue pump.
+		if ( Graphics.IsActive )
+		{
+			QueueFallbackProbeUpdates( 0 );
+			return;
+		}
+
+		int queued = Interlocked.Exchange( ref _queuedFallbackProbeUpdates, 0 );
+		if ( queued <= 0 )
+			return;
+
+		var probeCounts = _volume.ProbeCounts;
+		int numProbes = probeCounts.x * probeCounts.y * probeCounts.z;
+		if ( numProbes <= 0 )
+			return;
+
+		int updatesThisTick = Math.Min( queued, 2 );
+		for ( int i = 0; i < updatesThisTick; i++ )
+		{
+			UpdateProbeFallback( _nextProbeToUpdate );
+			_nextProbeToUpdate = ( _nextProbeToUpdate + 1 ) % numProbes;
+		}
+
+		if ( queued > updatesThisTick )
+		{
+			Interlocked.Add( ref _queuedFallbackProbeUpdates, queued - updatesThisTick );
+		}
 	}
 
 	private void FinishProbeCapture( int probeIndex )
@@ -297,8 +412,8 @@ internal class RTXGIVolumeUpdater : IDisposable
 		gpuDesc.probeBrightnessThreshold = 2.0f;
 		gpuDesc.probeRandomRayBackfaceThreshold = 0.1f;
 		gpuDesc.probeDistanceExponent = 7.0f;
-		gpuDesc.probeRelocationEnabled = true;
-		gpuDesc.probeClassificationEnabled = true;
+		gpuDesc.probeRelocationEnabled = !_isUsingFallback;
+		gpuDesc.probeClassificationEnabled = !_isUsingFallback;
 		gpuDesc.probeMinFrontfaceDistance = 1.0f;
 		gpuDesc.probeBackfaceThreshold = 0.1f;
 
@@ -352,6 +467,7 @@ internal class RTXGIVolumeUpdater : IDisposable
 
 	public void Dispose()
 	{
+		Interlocked.Exchange( ref _disposed, 1 );
 		RayDataTexture?.Dispose();
 		IrradianceTexture?.Dispose();
 		DistanceTexture?.Dispose();

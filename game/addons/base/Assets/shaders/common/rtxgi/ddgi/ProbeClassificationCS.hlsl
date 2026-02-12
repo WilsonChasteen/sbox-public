@@ -77,15 +77,15 @@
 
     // DDGIVolume constants structured buffer
     RTXGI_VK_BINDING(VOLUME_CONSTS_REGISTER, VOLUME_CONSTS_SPACE)
-    StructuredBuffer<DDGIVolumeDescGPUPacked> DDGIVolumes VOLUME_CONSTS_REG_DECL;
+    StructuredBuffer<DDGIVolumeDescGPUPacked> DDGIVolumes VOLUME_CONSTS_REG_DECL < Attribute( "DDGIVolumes" ); >;
 
     // DDGIVolume ray data (radiance and hit distances)
     RTXGI_VK_BINDING(RAY_DATA_REGISTER, RAY_DATA_SPACE)
-    RWTexture2DArray<float4> RayData RAY_DATA_REG_DECL;
+    RWTexture2DArray<float4> RayData RAY_DATA_REG_DECL < Attribute( "RayData" ); >;
 
     // Probe data (world-space offsets and classification states)
     RTXGI_VK_BINDING(PROBE_DATA_REGISTER, PROBE_DATA_SPACE)
-    RWTexture2DArray<float4> ProbeData PROBE_DATA_REG_DECL;
+    RWTexture2DArray<float4> ProbeData PROBE_DATA_REG_DECL < Attribute( "ProbeData" ); >;
 
 #endif // RTXGI_DDGI_BINDLESS_RESOURCES
 
@@ -187,12 +187,11 @@ void DDGIProbeClassificationCS(uint3 DispatchThreadID : SV_DispatchThreadID)
         float3 p0z = probeWorldPosition + (volume.probeSpacing.z * zNormal);
 
         // Get the ray's intersection distance with each plane
-        float3 distances = 
-        {
+        float3 distances = float3(
             dot((p0x - probeWorldPosition), xNormal) / max(dot(direction, xNormal), 0.000001f),
             dot((p0y - probeWorldPosition), yNormal) / max(dot(direction, yNormal), 0.000001f),
             dot((p0z - probeWorldPosition), zNormal) / max(dot(direction, zNormal), 0.000001f)
-        };
+        );
 
         // If the ray is parallel to the plane, it will never intersect
         // Set the distance to a very large number for those planes

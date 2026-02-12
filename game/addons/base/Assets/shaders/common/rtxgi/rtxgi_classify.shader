@@ -19,13 +19,10 @@ COMMON
 
 	#include "common.fxc"
 
-    // Bindings
-    StructuredBuffer<DDGIVolumeDescGPUPacked> DDGIVolumes < Attribute( "DDGIVolumes" ); >;
-    RWTexture2DArray<float4> RayData < Attribute( "RayData" ); >;
-    RWTexture2DArray<float4> ProbeData < Attribute( "ProbeData" ); >;
 }
 
 CS
 {
+    #define DDGIProbeClassificationCS MainCs
     #include "common/rtxgi/ddgi/ProbeClassificationCS.hlsl"
 }

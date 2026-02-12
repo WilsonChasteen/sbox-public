@@ -265,7 +265,7 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	internal bool BuildData( out RTXGIVolumeUpdater.DDGIVolumeDescGPUPacked data )
 	{
 		data = default;
-		var irr = IrradianceTexture ?? _rtxgiUpdater?.IrradianceTexture;
+		var irr = IsCompatibleArrayTexture( IrradianceTexture ) ? IrradianceTexture : _rtxgiUpdater?.IrradianceTexture;
 		if ( irr is null || !irr.IsValid() ) return false;
 
 		var gpuDesc = new RTXGIVolumeUpdater.DDGIVolumeDescGPU();
@@ -292,12 +292,22 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 
 		data.Pack( gpuDesc );
 
-		var dist = DistanceTexture ?? _rtxgiUpdater?.DistanceTexture;
-		var dataTex = RelocationTexture ?? _rtxgiUpdater?.ProbeDataTexture;
+		var dist = IsCompatibleArrayTexture( DistanceTexture ) ? DistanceTexture : _rtxgiUpdater?.DistanceTexture;
+		var dataTex = IsCompatibleArrayTexture( RelocationTexture ) ? RelocationTexture : _rtxgiUpdater?.ProbeDataTexture;
 
 		data.data12 = new Vector4( irr.Index, dist?.Index ?? -1, dataTex?.Index ?? -1, (int)Method );
 
 		return true;
+	}
+
+	private static bool IsCompatibleArrayTexture( Texture texture )
+	{
+		if ( texture is null || !texture.IsValid() )
+			return false;
+
+		var flags = texture.Desc.m_nFlags;
+		return flags.HasFlag( NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_TEXTURE_ARRAY )
+			&& !flags.HasFlag( NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_VOLUME_TEXTURE );
 	}
 
 	private Vector3Int ComputeProbeCounts()
