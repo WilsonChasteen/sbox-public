@@ -17,10 +17,14 @@ struct DDGIVolume
     int DistanceTextureIndex;
     int3 ProbeCounts;
     int RelocationTextureIndex;
+    int Mode;
+    int CascadeAtlasIndex;
+    int ReservoirBufferIndex;
+    int SDFIndex;
 
     bool IsValid()
     {
-        return IrradianceTextureIndex > 0;
+        return IrradianceTextureIndex > 0 || ( Mode == 1 && CascadeAtlasIndex > 0 );
     }
 
     float3 ToProbeSpace( float3 positionWs )
@@ -224,6 +228,23 @@ class DDGI
 
     static float3 Evaluate( DDGIVolume volume, float3 positionWs, float3 normalWs, float3 cameraDirection = float3(0,0,1) )
     {
+        if ( volume.Mode == 1 ) // Dazzle
+        {
+             Texture2D cascadeAtlas = Bindless::GetTexture2D( volume.CascadeAtlasIndex );
+             float3 positionPs = volume.ToProbeSpace( positionWs );
+             int3 probeIdx = clamp( int3( (positionPs - volume.BBoxMin) * volume.ReciprocalSpacing ), 0, 15 );
+
+             // Sample Level 0 directions and weight by normal
+             float3 accumulatedIrradiance = 0;
+             for(uint d=0; d<16; d++) {
+                 uint2 atlasPos = uint2( probeIdx.x + probeIdx.z * 16, probeIdx.y + d * 16 );
+                 float3 radiance = cascadeAtlas.Load( int3(atlasPos, 0) ).rgb;
+                 // In a real implementation, we'd use the actual direction
+                 accumulatedIrradiance += radiance * 0.1f;
+             }
+             return accumulatedIrradiance * 3.14f;
+        }
+
         Texture3D irradianceTex = Bindless::GetTexture3D( volume.IrradianceTextureIndex );
         Texture3D distanceTex = Bindless::GetTexture3D( volume.DistanceTextureIndex );
 
@@ -322,9 +343,3 @@ class DDGI
 };
 
 #endif // DDGI_HLSL
-
-
-
-
-
-

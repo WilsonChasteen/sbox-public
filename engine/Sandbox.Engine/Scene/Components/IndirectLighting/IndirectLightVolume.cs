@@ -37,6 +37,21 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		Relocate
 	}
 
+	public enum GIMode
+	{
+		/// <summary>
+		/// Standard baked DDGI using a probe grid.
+		/// </summary>
+		[Icon( "grid_on" )]
+		BakedDDGI,
+
+		/// <summary>
+		/// Real-time GI using Radiance Cascades and Persistent Reservoirs.
+		/// </summary>
+		[Icon( "auto_awesome" )]
+		Dazzle
+	}
+
 	/// <summary>
 	/// Per-probe data including position offset and active state.
 	/// </summary>
@@ -62,9 +77,16 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	public BBox Bounds { get; set; } = BBox.FromPositionAndSize( Vector3.Zero, new Vector3( 512.0f ) );
 
 	/// <summary>
+	/// Which Global Illumination technique to use for this volume.
+	/// </summary>
+	[Property, MakeDirty]
+	public GIMode Mode { get; set; } = GIMode.BakedDDGI;
+
+	/// <summary>
 	/// Number of probes per 1024 world units. Higher values increase probe resolution.
 	/// </summary>
 	[Property, Range( 1, 15 ), MakeDirty]
+	[ShowIf( nameof( Mode ), GIMode.BakedDDGI )]
 	public int ProbeDensity { get; set; } = 8;
 
 	/// <summary>
@@ -73,6 +95,26 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	[Group( "Advanced Settings" )]
 	[Property, Range( -0.0f, 50.0f ), MakeDirty]
 	public float NormalBias { get; set; } = 5.0f;
+
+	[Group( "Dazzle Settings" )]
+	[Property, Range( 2, 8 ), ShowIf( nameof( Mode ), GIMode.Dazzle )]
+	public int CascadeLevels { get; set; } = 4;
+
+	[Group( "Dazzle Settings" )]
+	[Property, Range( 4, 32 ), ShowIf( nameof( Mode ), GIMode.Dazzle )]
+	public int BaseDirections { get; set; } = 16;
+
+	[Group( "Dazzle Settings" )]
+	[Property, Range( 0.1f, 10.0f ), ShowIf( nameof( Mode ), GIMode.Dazzle )]
+	public float ReservoirCellSize { get; set; } = 1.0f;
+
+	[Group( "Dazzle Settings" )]
+	[Property, Range( 0.1f, 4.0f ), ShowIf( nameof( Mode ), GIMode.Dazzle )]
+	public float SurfelDensity { get; set; } = 1.0f;
+
+	[Group( "Dazzle Settings" )]
+	[Property, ShowIf( nameof( Mode ), GIMode.Dazzle )]
+	public bool UseHardwareRT { get; set; } = true;
 
 	/// <summary>
 	/// Controls how much less energy to conserve during probe integration.
@@ -312,10 +354,20 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 				probeCounts.z > 1 ? 1.0f / (probeCounts.z - 1) : 0.0f
 			),
 			ProbeCounts = probeCounts,
-			RelocationTextureIndex = RelocationTexture.Index,
-			IrradianceTextureIndex = IrradianceTexture.Index,
-			DistanceTextureIndex = DistanceTexture.Index,
+			RelocationTextureIndex = RelocationTexture.IsValid() ? RelocationTexture.Index : 0,
+			IrradianceTextureIndex = IrradianceTexture.IsValid() ? IrradianceTexture.Index : 0,
+			DistanceTextureIndex = DistanceTexture.IsValid() ? DistanceTexture.Index : 0,
+			Mode = (int)Mode,
 		};
+
+		if ( Mode == GIMode.Dazzle && DazzleGISystem.Current != null )
+		{
+			if ( DazzleGISystem.Current.GetResources( Id, out var res ) )
+			{
+				data.CascadeAtlasIndex = res.Cascades.IsValid() ? res.Cascades.Index : 0;
+				data.SDFIndex = res.SDF.IsValid() ? res.SDF.Index : 0;
+			}
+		}
 
 		return true;
 	}
@@ -335,6 +387,10 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		public int DistanceTextureIndex;
 		public Vector3Int ProbeCounts;
 		public int RelocationTextureIndex;
+		public int Mode;
+		public int CascadeAtlasIndex;
+		public int ReservoirBufferIndex;
+		public int SDFIndex;
 	}
 
 	//
