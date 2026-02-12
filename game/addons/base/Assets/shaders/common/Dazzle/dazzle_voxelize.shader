@@ -7,6 +7,8 @@ HEADER
 MODES
 {
 	Default();
+	Forward();
+	Depth();
 }
 
 FEATURES

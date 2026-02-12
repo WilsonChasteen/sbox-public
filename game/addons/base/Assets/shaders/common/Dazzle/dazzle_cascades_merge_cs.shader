@@ -34,7 +34,7 @@ CS
 			uint2 currentPos = uint2( id.x + id.z * 16, id.y + d * 16 );
 			float4 currentVal = CascadeAtlas[currentPos];
 
-			if ( currentVal.y > 0.001f )
+			if ( currentVal.w > 0.001f )
 			{
 				float3 nextProbePos = (float3)id * 0.5f;
 				float3 nextRadiance = 0;
@@ -47,10 +47,7 @@ CS
 					nextRadiance += CascadeAtlas[nextPos].rgb * 0.25f;
 				}
 
-				currentVal.rgb += currentVal.a * nextRadiance; // Using a for transmittance? Wait, I stored it in y.
-				// Wait, in trace shader: CascadeAtlas[atlasPos] = float4( hitRadiance * ( 1.0f - transmittance ), transmittance );
-				// So y is transmittance.
-				currentVal.rgb += currentVal.y * nextRadiance;
+				currentVal.rgb += currentVal.w * nextRadiance;
 				CascadeAtlas[currentPos] = currentVal;
 			}
 		}

@@ -9,6 +9,11 @@ MODES
 	Default();
 }
 
+COMMON
+{
+	#include "common/shared.hlsl"
+}
+
 CS
 {
 	DynamicCombo( D_UINT, 0..1, Sys( ALL ) );

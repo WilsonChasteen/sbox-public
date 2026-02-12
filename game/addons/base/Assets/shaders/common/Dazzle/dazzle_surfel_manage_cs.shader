@@ -32,15 +32,15 @@ CS
 	int3 HashGridSize < Attribute( "HashGridSize" ); >;
 
 	[numthreads( 8, 8, 1 )]
-	void MainCs( uint2 id : SV_DispatchThreadID )
+	void MainCs( uint3 id : SV_DispatchThreadID )
 	{
 		// Only sample every Nth pixel to save performance
 		if ( ( id.x % 16 != 0 ) || ( id.y % 16 != 0 ) ) return;
 
-		float depth = Depth::Get( id );
+		float depth = Depth::Get( id.xy );
 		if ( depth >= 1.0f ) return;
 
-		float2 uv = ( (float2)id + 0.5f ) * g_vInvViewportSize.xy;
+		float2 uv = ( (float2)id.xy + 0.5f ) * g_vInvViewportSize.xy;
 		float3 posPs = float3( uv * 2.0f - 1.0f, depth );
 		posPs.y *= -1.0f;
 		float4 posWs4 = mul( g_matProjectionToWorld, float4( posPs, 1.0f ) );
@@ -48,8 +48,8 @@ CS
 
 		if ( any( posWs < VolumeMin ) || any( posWs > VolumeMax ) ) return;
 
-		float3 normalWs = Normals::Sample( id );
-		float3 albedo = g_tColor.Load( int3( id, 0 ) ).rgb;
+		float3 normalWs = Normals::Sample( id.xy );
+		float3 albedo = g_tColor.Load( int3( id.xy, 0 ) ).rgb;
 
 		// Check if covered by existing surfel
 		float3 posLocal = ( posWs - VolumeMin ) / ( VolumeMax - VolumeMin );

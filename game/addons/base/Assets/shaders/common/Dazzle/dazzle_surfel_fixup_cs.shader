@@ -9,13 +9,18 @@ MODES
 	Default();
 }
 
+COMMON
+{
+	#include "common/shared.hlsl"
+}
+
 CS
 {
 	RWByteAddressBuffer DispatchBuffer < Attribute( "DispatchBuffer" ); >;
 	ByteAddressBuffer CountBuffer < Attribute( "CountBuffer" ); >;
 
 	[numthreads( 1, 1, 1 )]
-	void MainCs()
+	void MainCs( uint3 id : SV_DispatchThreadID )
 	{
 		uint count = CountBuffer.Load( 0 );
 		uint groups = ( count + 63 ) / 64;
