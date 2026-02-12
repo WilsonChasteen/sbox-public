@@ -18,41 +18,39 @@ COMMON
 {
 	#define CUSTOM_MATERIAL_INPUTS
 	#include "common/shared.hlsl"
-	#include "common/Bindless.hlsl"
-
-	RWTexture3D<float> VoxelGrid < Attribute( "VoxelGrid" ); >;
-	float3 VolumeMin < Attribute( "VolumeMin" ); >;
-	float3 VolumeMax < Attribute( "VolumeMax" ); >;
-	int3 GridSize < Attribute( "GridSize" ); >;
 }
 
 struct VertexInput
 {
-	float3 Position : POSITION < Semantic( PosXyz ); >;
+	#include "common/vertexinput.hlsl"
 };
 
 struct PixelInput
 {
-	float3 WorldPosition : TEXCOORD0;
-	float4 PixelPosition : SV_Position;
+	#include "common/pixelinput.hlsl"
 };
 
 VS
 {
+	#include "common/vertex.hlsl"
+
 	PixelInput MainVs( VertexInput i )
 	{
-		PixelInput o;
-		o.WorldPosition = PositionLocalToWorld( i.Position );
-		o.PixelPosition = PositionWorldToProjection( o.WorldPosition );
-		return o;
+		PixelInput o = ProcessVertex( i );
+		return FinalizeVertex( o );
 	}
 }
 
 PS
 {
+	RWTexture3D<float> VoxelGrid < Attribute( "VoxelGrid" ); >;
+	float3 VolumeMin < Attribute( "VolumeMin" ); >;
+	float3 VolumeMax < Attribute( "VolumeMax" ); >;
+	int3 GridSize < Attribute( "GridSize" ); >;
+
 	void MainPs( PixelInput i )
 	{
-		float3 pos = ( i.WorldPosition - VolumeMin ) / ( VolumeMax - VolumeMin );
+		float3 pos = ( i.vPositionWithOffsetWs + g_vHighPrecisionLightingOffsetWs.xyz - VolumeMin ) / ( VolumeMax - VolumeMin );
 		if ( any( pos < 0 ) || any( pos > 1 ) ) return;
 
 		int3 voxel = int3( pos * GridSize );

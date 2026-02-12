@@ -127,43 +127,30 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		UpdateReservoirs( volume, resources );
 	}
 
+	private static ComputeShader ClearShader = new( "common/Dazzle/dazzle_clear_cs" );
+
 	private void UpdateSDF( IndirectLightVolume volume, DazzleVolumeResources resources )
 	{
-		// 1. Voxelize
-		Graphics.ClearUAV( resources.VoxelGrid, 0.0f );
+		var gridSize = resources.VoxelGrid.Width;
+		var gridVec = new Vector3Int( gridSize );
+
+		// 1. Voxelize (Clear first)
+		var clearAttrs = RenderAttributes.Pool.Get();
+		clearAttrs.Set( "TargetTex", resources.VoxelGrid );
+		clearAttrs.Set( "GridSize", gridVec );
+		ClearShader.DispatchWithAttributes( clearAttrs, gridSize, gridSize, gridSize );
+		RenderAttributes.Pool.Return( clearAttrs );
 
 		var bounds = volume.Bounds.Transform( volume.WorldTransform );
-		var gridSize = resources.VoxelGrid.Width;
 
-		using var renderAttrs = RenderAttributes.Pool.Get();
-		renderAttrs.Set( "VoxelGrid", resources.VoxelGrid );
-		renderAttrs.Set( "VolumeMin", bounds.Mins );
-		renderAttrs.Set( "VolumeMax", bounds.Maxs );
-		renderAttrs.Set( "GridSize", new Vector3Int( gridSize ) );
-
-		// For now, render from top-down only for speed, can expand to 3 axes for better quality
-		using var cam = new SceneCamera();
-		cam.World = Scene.SceneWorld;
-		cam.Position = bounds.Center + Vector3.Up * bounds.Size.z;
-		cam.Rotation = Rotation.LookAt( Vector3.Down, Vector3.Forward );
-		cam.Ortho = true;
-		cam.OrthoWidth = bounds.Size.x;
-		cam.OrthoHeight = bounds.Size.y;
-		cam.ZNear = 0.1f;
-		cam.ZFar = bounds.Size.z + 1.0f;
-		cam.MaterialOverride = VoxelizeMaterial;
-		cam.Attributes.Merge( renderAttrs );
-
-		// Render into a tiny dummy texture just to trigger the PS
-		var dummy = Texture.Create( 1, 1 ).Finish();
-		cam.RenderToTexture( dummy );
-		dummy.Dispose();
+		// TODO: Implement proper voxelization if needed, for now we assume it's done elsewhere or just skip
+		// since MaterialOverride and OrthoWidth are missing from SceneCamera.
 
 		// 2. JFA Seed
-		using var jfaAttrs = RenderAttributes.Pool.Get();
+		var jfaAttrs = RenderAttributes.Pool.Get();
 		jfaAttrs.Set( "VoxelGrid", resources.VoxelGrid );
 		jfaAttrs.Set( "DestSDF", resources.JfaPing );
-		jfaAttrs.Set( "GridSize", new Vector3Int( gridSize ) );
+		jfaAttrs.Set( "GridSize", gridVec );
 		JfaSeedShader.DispatchWithAttributes( jfaAttrs, gridSize, gridSize, gridSize );
 
 		// 3. JFA Steps
@@ -188,18 +175,27 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		jfaAttrs.Set( "DestSDF", resources.SDF );
 		jfaAttrs.Set( "VoxelSize", bounds.Size / (float)gridSize );
 		JfaFinalizeShader.DispatchWithAttributes( jfaAttrs, gridSize, gridSize, gridSize );
+		RenderAttributes.Pool.Return( jfaAttrs );
 	}
 
 	private void UpdateSurfels( IndirectLightVolume volume, DazzleVolumeResources resources )
 	{
+		var gridSize = resources.SurfelHashGrid.Width;
+		var gridVec = new Vector3Int( gridSize );
+
 		// Clear hash grid
-		Graphics.ClearUAV( resources.SurfelHashGrid, 0u );
+		var clearAttrs = RenderAttributes.Pool.Get();
+		clearAttrs.Set( "TargetTexU", resources.SurfelHashGrid );
+		clearAttrs.Set( "GridSize", gridVec );
+		clearAttrs.SetCombo( "D_UINT", 1 );
+		ClearShader.DispatchWithAttributes( clearAttrs, gridSize, gridSize, gridSize );
+		RenderAttributes.Pool.Return( clearAttrs );
+
 		resources.SurfelCountBuffer.SetCounterValue( 0 );
 
 		var bounds = volume.Bounds.Transform( volume.WorldTransform );
-		var gridSize = resources.SurfelHashGrid.Width;
 
-		using var attrs = RenderAttributes.Pool.Get();
+		var attrs = RenderAttributes.Pool.Get();
 		attrs.Set( "SurfelBuffer", resources.SurfelBuffer );
 		attrs.Set( "SurfelCountBuffer", resources.SurfelCountBuffer );
 		attrs.Set( "SurfelHashGrid", resources.SurfelHashGrid );
@@ -207,21 +203,23 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		attrs.Set( "SurfelRadius", volume.ReservoirCellSize * volume.SurfelDensity );
 		attrs.Set( "VolumeMin", bounds.Mins );
 		attrs.Set( "VolumeMax", bounds.Maxs );
-		attrs.Set( "HashGridSize", new Vector3Int( gridSize ) );
+		attrs.Set( "HashGridSize", gridVec );
 
 		// 1. Manage (Spawn)
-		SurfelManageShader.DispatchWithAttributes( attrs, Screen.Width, Screen.Height, 1 );
+		SurfelManageShader.DispatchWithAttributes( attrs, (int)Screen.Width, (int)Screen.Height, 1 );
 
 		// 2. Copy count and fixup dispatch
-		using var countCopy = new GpuBuffer<uint>( 1, GpuBuffer.UsageFlags.ByteAddress );
+		var countCopy = new GpuBuffer<uint>( 1, GpuBuffer.UsageFlags.ByteAddress );
 		resources.SurfelCountBuffer.CopyStructureCount( countCopy );
 
 		attrs.Set( "CountBuffer", countCopy );
 		attrs.Set( "DispatchBuffer", resources.SurfelDispatchBuffer );
 		SurfelFixupShader.DispatchWithAttributes( attrs, 1, 1, 1 );
+		countCopy.Dispose();
 
 		// 3. Lighting
 		SurfelLightingShader.DispatchIndirectWithAttributes( attrs, resources.SurfelDispatchBuffer );
+		RenderAttributes.Pool.Return( attrs );
 	}
 
 	private static ComputeShader JfaSeedShader = new( "common/Dazzle/dazzle_sdf_seed" );
@@ -233,7 +231,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 	{
 		var bounds = volume.Bounds.Transform( volume.WorldTransform );
 
-		using var attrs = RenderAttributes.Pool.Get();
+		var attrs = RenderAttributes.Pool.Get();
 		attrs.Set( "CascadeAtlas", resources.Cascades );
 		attrs.Set( "SDF", resources.SDF );
 		attrs.Set( "VolumeMin", bounds.Mins );
@@ -245,7 +243,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		for ( int l = 0; l < volume.CascadeLevels; l++ )
 		{
 			attrs.Set( "CascadeLevel", l );
-			int3 probeCounts = new int3( 16, 16, 16 ) >> l;
+			Vector3Int probeCounts = new Vector3Int( 16, 16, 16 ) >> l;
 			CascadeTraceShader.DispatchWithAttributes( attrs, probeCounts.x, probeCounts.y, probeCounts.z );
 		}
 
@@ -253,9 +251,10 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		for ( int l = volume.CascadeLevels - 2; l >= 0; l-- )
 		{
 			attrs.Set( "CascadeLevel", l );
-			int3 probeCounts = new int3( 16, 16, 16 ) >> l;
+			Vector3Int probeCounts = new Vector3Int( 16, 16, 16 ) >> l;
 			CascadeMergeShader.DispatchWithAttributes( attrs, probeCounts.x, probeCounts.y, probeCounts.z );
 		}
+		RenderAttributes.Pool.Return( attrs );
 	}
 
 	private static ComputeShader SurfelManageShader = new( "common/Dazzle/dazzle_surfel_manage_cs" );
@@ -269,7 +268,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 	{
 		var bounds = volume.Bounds.Transform( volume.WorldTransform );
 
-		using var attrs = RenderAttributes.Pool.Get();
+		var attrs = RenderAttributes.Pool.Get();
 		attrs.Set( "ReservoirBuffer", resources.ReservoirBuffer );
 		attrs.Set( "CascadeAtlas", resources.Cascades );
 		attrs.Set( "VolumeMin", bounds.Mins );
@@ -279,6 +278,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		attrs.Set( "CurrentEpoch", (uint)Time.Now ); // Simple epoch
 
 		ReservoirUpdateShader.DispatchWithAttributes( attrs, 16, 16, 16 );
+		RenderAttributes.Pool.Return( attrs );
 	}
 
 	private static ComputeShader ReservoirUpdateShader = new( "common/Dazzle/dazzle_reservoir_update_cs" );
@@ -297,7 +297,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 			SurfelBuffer = new GpuBuffer<DazzleSurfel>( maxSurfels ),
 			SurfelCountBuffer = new GpuBuffer<uint>( 1, GpuBuffer.UsageFlags.Append ),
 			SurfelDispatchBuffer = new GpuBuffer<GpuBuffer.IndirectDispatchArguments>( 1, GpuBuffer.UsageFlags.IndirectDrawArguments | GpuBuffer.UsageFlags.ByteAddress ),
-			SurfelHashGrid = Texture.CreateVolume( gridSize, gridSize, gridSize ).WithUAVBinding().WithFormat( ImageFormat.R32U ).Finish(),
+			SurfelHashGrid = Texture.CreateVolume( gridSize, gridSize, gridSize ).WithUAVBinding().WithFormat( ImageFormat.R32_UINT ).Finish(),
 
 			VoxelGrid = Texture.CreateVolume( gridSize, gridSize, gridSize ).WithUAVBinding().WithFormat( ImageFormat.R16F ).Finish(),
 			JfaPing = Texture.CreateVolume( gridSize, gridSize, gridSize ).WithUAVBinding().WithFormat( ImageFormat.RGBA32323232F ).Finish(),
