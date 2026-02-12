@@ -5,7 +5,7 @@ namespace Sandbox.Rendering;
 /// <summary>
 /// Base class for render extensions.
 /// </summary>
-internal abstract class RenderExtension : IRenderExtension
+public abstract class RenderExtension : IRenderExtension
 {
 	/// <summary>
 	/// Called when layers are being added to the view.

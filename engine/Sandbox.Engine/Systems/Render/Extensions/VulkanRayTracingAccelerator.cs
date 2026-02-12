@@ -9,7 +9,7 @@ namespace Sandbox.Rendering;
 /// A hardware ray tracing accelerator that communicates directly with the Vulkan API.
 /// This bypasses any existing engine ray tracing code to provide a clean, high-performance implementation.
 /// </summary>
-internal class VulkanRayTracingAccelerator : RenderExtension
+public class VulkanRayTracingAccelerator : RenderExtension
 {
 	#region Vulkan Interop
 	private const string VULKAN_LIB = "vulkan-1.dll";
