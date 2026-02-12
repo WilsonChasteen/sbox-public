@@ -27,7 +27,7 @@ CS
 		int3 probeCounts = int3( 16, 16, 16 ) >> CascadeLevel;
 		if ( any( (int3)id >= probeCounts ) ) return;
 
-		uint numDirs = 16 << ( 2 * CascadeLevel );
+		uint numDirs = 16u << ( 2 * CascadeLevel );
 
 		for ( uint d = 0; d < numDirs; d++ )
 		{
@@ -44,7 +44,7 @@ CS
 
 				// Simplified: just sample the corresponding probe in next level
 				uint3 nextId = uint3( nextProbePos );
-				uint nextNumDirs = 16 << ( 2 * ( CascadeLevel + 1 ) );
+				uint nextNumDirs = 16u << ( 2 * ( CascadeLevel + 1 ) );
 
 				for ( uint nd = 0; nd < 4; nd++ )
 				{

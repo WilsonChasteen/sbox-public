@@ -5,6 +5,31 @@ using System.Collections.Generic;
 using System.Linq;
 using Sandbox.Rendering;
 
+[StructLayout( LayoutKind.Sequential )]
+public struct DazzleSurfel
+{
+	public Vector3 Position;
+	public Vector3 Normal;
+	public Vector3 Albedo;
+	public Vector3 Radiance;
+	public float Radius;
+	public uint LastUsedFrame;
+	public Vector3 Padding;
+}
+
+[StructLayout( LayoutKind.Sequential )]
+public struct DazzleReservoir
+{
+	public Vector3 Radiance;
+	public Vector3 Direction;
+	public float Weight;
+	public uint M;
+	public float W_sum;
+	public Vector3 Normal;
+	public uint Epoch;
+	public Vector3 Padding;
+}
+
 /// <summary>
 /// Real-time GI system implementing "Dazzle" (Radiance Cascades + Persistent Reservoirs).
 /// </summary>

@@ -19,6 +19,7 @@ COMMON
 	#define CUSTOM_MATERIAL_INPUTS
 	#include "common/shared.hlsl"
 	#include "common/Bindless.hlsl"
+	#include "common/vertex.hlsl"
 
 	RWTexture3D<float> VoxelGrid < Attribute( "VoxelGrid" ); >;
 	float3 VolumeMin < Attribute( "VolumeMin" ); >;

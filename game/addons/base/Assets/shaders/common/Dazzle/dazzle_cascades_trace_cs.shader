@@ -49,7 +49,7 @@ CS
 		float i = (float)dirIdx + 0.5f;
 		float phi = 2.0f * PI * goldenRatio * i;
 		float cosTheta = 1.0f - 2.0f * ( i / totalDirs );
-		float sinTheta = sqrt( 1.0f - cosTheta * cosTheta );
+		float sinTheta = sqrt( saturate( 1.0f - cosTheta * cosTheta ) );
 		return float3( cos( phi ) * sinTheta, sin( phi ) * sinTheta, cosTheta );
 	}
 
@@ -60,12 +60,12 @@ CS
 		int3 probeCounts = int3( 16, 16, 16 ) >> CascadeLevel; // Coarser for higher levels
 		if ( any( (int3)id >= probeCounts ) ) return;
 
-		float3 spacing = ( VolumeMax - VolumeMin ) / (float3)probeCounts;
+		float3 spacing = ( VolumeMax - VolumeMin ) / (float3)max(probeCounts, 1);
 		float3 origin = VolumeMin + ( (float3)id + 0.5f ) * spacing;
 
-		uint numDirs = BaseDirections << ( 2 * CascadeLevel );
-		float intervalMin = CascadeLevel == 0 ? 0 : ( 1.0f * ( 1 << ( CascadeLevel - 1 ) ) );
-		float intervalMax = 1.0f * ( 1 << CascadeLevel );
+		uint numDirs = (uint)BaseDirections << ( 2 * CascadeLevel );
+		float intervalMin = CascadeLevel == 0 ? 0.0f : ( 1.0f * ( 1u << (uint)( CascadeLevel - 1 ) ) );
+		float intervalMax = 1.0f * ( 1u << (uint)CascadeLevel );
 
 		// We need to store radiance for each direction
 		// For now, let's just do one direction per thread and use id.w as direction index?
@@ -77,7 +77,7 @@ CS
 
 			// Raymarch SDF
 			float dist = intervalMin;
-			float hitRadiance = 0;
+			float3 hitRadiance = 0;
 			float transmittance = 1.0f;
 
 			[loop]
@@ -97,7 +97,7 @@ CS
 
 			// Store in Atlas (simplified indexing)
 			uint2 atlasPos = uint2( id.x + id.z * 16, id.y + d * 16 );
-			CascadeAtlas[atlasPos] = float4( hitRadiance * ( 1.0f - transmittance ), transmittance, 0, 0 );
+			CascadeAtlas[atlasPos] = float4( hitRadiance * ( 1.0f - transmittance ), transmittance );
 		}
 	}
 }

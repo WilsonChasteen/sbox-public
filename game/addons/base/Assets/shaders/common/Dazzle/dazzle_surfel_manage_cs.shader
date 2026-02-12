@@ -31,11 +31,6 @@ CS
 	float3 VolumeMax < Attribute( "VolumeMax" ); >;
 	int3 HashGridSize < Attribute( "HashGridSize" ); >;
 
-	uint GetHash( int3 pos )
-	{
-		return (uint)( ( pos.x * 73856093 ) ^ ( pos.y * 19349663 ) ^ ( pos.z * 83492791 ) );
-	}
-
 	[numthreads( 8, 8, 1 )]
 	void MainCs( uint2 id : SV_DispatchThreadID )
 	{
@@ -45,7 +40,12 @@ CS
 		float depth = Depth::Get( id );
 		if ( depth >= 1.0f ) return;
 
-		float3 posWs = Position3PsToWs( float3( id, depth ) );
+		float2 uv = ( (float2)id + 0.5f ) * g_vInvViewportSize.xy;
+		float3 posPs = float3( uv * 2.0f - 1.0f, depth );
+		posPs.y *= -1.0f;
+		float4 posWs4 = mul( g_matProjectionToWorld, float4( posPs, 1.0f ) );
+		float3 posWs = posWs4.xyz / posWs4.w;
+
 		if ( any( posWs < VolumeMin ) || any( posWs > VolumeMax ) ) return;
 
 		float3 normalWs = Normals::Sample( id );
@@ -55,8 +55,6 @@ CS
 		float3 posLocal = ( posWs - VolumeMin ) / ( VolumeMax - VolumeMin );
 		int3 hashPos = int3( posLocal * HashGridSize );
 
-		// Simple spatial check in hash grid
-		// For now, we just spawn if the cell is empty or if we are the first one there
 		uint cellValue;
 		InterlockedCompareExchange( SurfelHashGrid[hashPos], 0, 1, cellValue );
 
@@ -77,7 +75,6 @@ CS
 				s.LastUsedFrame = (uint)g_flTime;
 				SurfelBuffer[index] = s;
 
-				// Store index in hash grid (+1 so 0 means empty)
 				SurfelHashGrid[hashPos] = index + 1;
 			}
 		}

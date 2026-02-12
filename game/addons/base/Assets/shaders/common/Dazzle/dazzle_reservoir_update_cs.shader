@@ -31,6 +31,11 @@ CS
 		return (uint)( ( pos.x * 73856093 ) ^ ( pos.y * 19349663 ) ^ ( pos.z * 83492791 ) );
 	}
 
+	float SimpleHash( float n )
+	{
+		return frac( sin( n ) * 43758.5453123 );
+	}
+
 	[numthreads( 8, 8, 8 )]
 	void MainCs( uint3 id : SV_DispatchThreadID )
 	{
@@ -64,7 +69,7 @@ CS
 		// Update reservoir (Simplified ReSTIR)
 		r.W_sum += candidateWeight;
 		r.M += 1;
-		if ( FracSin( (float)hash + g_flTime ) < ( candidateWeight / max( r.W_sum, 0.0001f ) ) )
+		if ( SimpleHash( (float)hash + g_flTime ) < ( candidateWeight / max( r.W_sum, 0.0001f ) ) )
 		{
 			r.Radiance = candidateRadiance;
 			r.Direction = float3( 0, 1, 0 ); // Should be the actual direction
