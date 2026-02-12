@@ -861,24 +861,19 @@ public sealed unsafe partial class CommandList
 	public RenderTargetHandle.SizeHandle ViewportSize => new RenderTargetHandle.SizeHandle { Name = "$vp" };
 
 	/// <summary>
-	/// A handle to the viewport size divided by a factor. Useful for dispatching at half or quarter resolution.
-	/// </summary>
-	public RenderTargetHandle.SizeHandle ViewportSizeScaled( int divisor ) => new RenderTargetHandle.SizeHandle { Name = "$vp", Divisor = Math.Max( 1, divisor ) };
-
-	/// <summary>
 	/// Dispatch a compute shader
 	/// </summary>
 	public void DispatchCompute( ComputeShader compute, RenderTargetHandle.SizeHandle dimension )
 	{
 		static void Execute( ref Entry entry, CommandList commandList )
 		{
-			var xyz = commandList.GetDimension( (string)entry.Object5, (int)entry.Data1.x );
+			var xyz = commandList.GetDimension( (string)entry.Object5 );
 			if ( !xyz.HasValue ) return;
 
 			((ComputeShader)entry.Object1).DispatchWithAttributes( Graphics.Attributes, xyz.Value.x, xyz.Value.y, xyz.Value.z );
 		}
 
-		AddEntry( &Execute, new Entry { Object1 = compute, Object5 = dimension.Name, Data1 = new Vector4( dimension.Divisor, 0, 0, 0 ) } );
+		AddEntry( &Execute, new Entry { Object1 = compute, Object5 = dimension.Name } );
 	}
 
 	/// <summary>
@@ -888,41 +883,26 @@ public sealed unsafe partial class CommandList
 	{
 		static void Execute( ref Entry entry, CommandList commandList )
 		{
-			var xyz = commandList.GetDimension( (string)entry.Object5, (int)entry.Data1.x );
+			var xyz = commandList.GetDimension( (string)entry.Object5 );
 			if ( !xyz.HasValue ) return;
 
 			((RayTracingShader)entry.Object1).DispatchRaysWithAttributes( Graphics.Attributes, xyz.Value.x, xyz.Value.y, xyz.Value.z );
 		}
 
-		AddEntry( &Execute, new Entry { Object1 = raytracing, Object5 = dimension.Name, Data1 = new Vector4( dimension.Divisor, 0, 0, 0 ) } );
+		AddEntry( &Execute, new Entry { Object1 = raytracing, Object5 = dimension.Name } );
 	}
 
 	/// <summary>
 	/// Called during rendering, convert RenderTargetHandle.SizeHandle to a dimension
 	/// </summary>
-	Vector3Int? GetDimension( string name, int divisor = 0 )
+	Vector3Int? GetDimension( string name )
 	{
-		Vector3Int result;
+		if ( name == "$vp" ) return new Vector3Int( Graphics.Viewport.Width.CeilToInt(), Graphics.Viewport.Height.CeilToInt(), 1 );
 
-		if ( name == "$vp" )
-		{
-			result = new Vector3Int( Graphics.Viewport.Width.CeilToInt(), Graphics.Viewport.Height.CeilToInt(), 1 );
-		}
-		else
-		{
-			var rt = state.renderTargets.GetValueOrDefault( name );
-			if ( rt is null ) return default;
+		var rt = state.renderTargets.GetValueOrDefault( name );
+		if ( rt is null ) return default;
 
-			result = new Vector3Int( rt.Width, rt.Height, 1 );
-		}
-
-		if ( divisor > 1 )
-		{
-			result.x = Math.Max( 1, result.x / divisor );
-			result.y = Math.Max( 1, result.y / divisor );
-		}
-
-		return result;
+		return new Vector3Int( rt.Width, rt.Height, 1 );
 	}
 
 	/// <summary>
