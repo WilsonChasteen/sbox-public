@@ -16,16 +16,8 @@ using System.Threading;
 [Icon( "grid_view" )]
 [EditorHandle( "materials/gizmo/lpv.png" )]
 [Alias( "DDGIVolume" )]
-public sealed partial class IndirectLightVolume : Component, Component.ExecuteInEditor, Component.DontExecuteOnServer, Component.IRenderThread
+public sealed partial class IndirectLightVolume : Component, Component.ExecuteInEditor, Component.DontExecuteOnServer
 {
-	void Component.IRenderThread.OnRenderStage( CameraComponent camera, Sandbox.Rendering.Stage stage )
-	{
-		if ( Mode != GIMode.Dazzle ) return;
-		if ( stage != Sandbox.Rendering.Stage.AfterOpaque ) return;
-
-		DazzleGISystem.Current?.Dispatch( this, camera.SceneCamera );
-	}
-
 	/// <summary>
 	/// Behavior when a probe is detected inside geometry.
 	/// Relocation moves the probe out of geometry to reduce artifacts, while Deactivate simply disables the occluded probe, sealing leaks entirely.

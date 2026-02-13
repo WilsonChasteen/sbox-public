@@ -37,8 +37,6 @@ CS
 	#define DAZZLE_RC_ATLAS_HEIGHT 1024u
 	#define DAZZLE_RC_BASE_PROBE_DIM 16u
 
-	#include "common/classes/Raytracing.hlsl"
-
 	void DbgAdd( uint index, uint value )
 	{
 		uint original;
@@ -250,75 +248,42 @@ CS
 		float intervalMin = level == 0u ? 0.0f : ( baseInterval * ( 1u << ( level - 1u ) ) );
 		float intervalMax = baseInterval * ( 1u << level );
 
-		float3 voxelSize = ( VolumeMax - VolumeMin ) / max( (float3)HashGridSize, 1.0f.xxx );
-
 		for ( uint d = 0u; d < numDirs; ++d )
 		{
 			DbgAdd( DAZZLE_DBG_TRACE_RAYS, 1u );
 			float3 dir = GetDirection( d, numDirs );
 
+			// Raymarch SDF
+			float dist = intervalMin;
 			float3 hitRadiance = 0.0f;
 			float transmittance = 1.0f;
-			bool hitFound = false;
-			float3 hitPos;
+			float3 voxelSize = ( VolumeMax - VolumeMin ) / max( (float3)HashGridSize, 1.0f.xxx );
+			float sdfHitThreshold = max( min( voxelSize.x, min( voxelSize.y, voxelSize.z ) ) * 0.75f, 0.02f );
+			float minStep = max( min( voxelSize.x, min( voxelSize.y, voxelSize.z ) ) * 0.5f, 0.02f );
+			float maxStep = minStep * 4.0f;
 
-			// 1. Optional Hardware Raytracing (Select Function)
-			if ( UseRT )
+			[loop]
+			for ( int i = 0; i < 96; i++ )
 			{
-				RayDesc ray;
-				ray.Origin = origin;
-				ray.Direction = dir;
-				ray.TMin = intervalMin;
-				ray.TMax = intervalMax;
-
-				RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
-				q.TraceRayInline( Raytracing::GetAccelerationStructure(), RAY_FLAG_NONE, 0xFF, ray );
-				q.Proceed();
-
-				if ( q.CommittedStatus() == COMMITTED_TRIANGLE_HIT )
+				DbgAdd( DAZZLE_DBG_TRACE_STEPS, 1u );
+				float3 pos = origin + dir * dist;
+				float sdfDist = SampleSDF( pos );
+				bool sdfHit = sdfDist <= sdfHitThreshold;
+				if ( sdfHit || IsOccupied( pos ) )
 				{
-					hitFound = true;
-					hitPos = origin + dir * q.CommittedRayT();
-				}
-			}
-
-			// 2. SDF-tracing backup
-			if ( !hitFound )
-			{
-				float dist = intervalMin;
-				float sdfHitThreshold = max( min( voxelSize.x, min( voxelSize.y, voxelSize.z ) ) * 0.75f, 0.02f );
-				float minStep = max( min( voxelSize.x, min( voxelSize.y, voxelSize.z ) ) * 0.5f, 0.02f );
-				float maxStep = minStep * 4.0f;
-
-				[loop]
-				for ( int i = 0; i < 96; i++ )
-				{
-					DbgAdd( DAZZLE_DBG_TRACE_STEPS, 1u );
-					float3 pos = origin + dir * dist;
-					float sdfDist = SampleSDF( pos );
-					bool sdfHit = sdfDist <= sdfHitThreshold;
-					if ( sdfHit || IsOccupied( pos ) )
+					DbgAdd( DAZZLE_DBG_TRACE_HITS, 1u );
+					hitRadiance = GetRadianceAt( pos, -dir );
+					if ( !any( hitRadiance > 0.0f.xxx ) )
 					{
-						hitFound = true;
-						hitPos = pos;
-						break;
+						hitRadiance = EvaluateFallbackRadiance( pos, voxelSize );
 					}
-
-					float step = clamp( sdfDist, minStep, maxStep );
-					dist += step;
-					if ( dist > intervalMax ) break;
+					transmittance = 0.0f;
+					break;
 				}
-			}
 
-			if ( hitFound )
-			{
-				DbgAdd( DAZZLE_DBG_TRACE_HITS, 1u );
-				hitRadiance = GetRadianceAt( hitPos, -dir );
-				if ( !any( hitRadiance > 0.0f.xxx ) )
-				{
-					hitRadiance = EvaluateFallbackRadiance( hitPos, voxelSize );
-				}
-				transmittance = 0.0f;
+				float step = clamp( sdfDist, minStep, maxStep );
+				dist += step;
+				if ( dist > intervalMax ) break;
 			}
 
 			if ( transmittance > 0.0f )
