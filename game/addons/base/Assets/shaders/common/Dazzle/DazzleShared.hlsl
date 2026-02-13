@@ -36,7 +36,7 @@ struct DazzleSurfel
 	float3 Radiance;
 	float Radius;
 	uint LastUsedFrame;
-	float3 Padding;
+	float Padding[6];
 };
 
 struct DazzleReservoir
