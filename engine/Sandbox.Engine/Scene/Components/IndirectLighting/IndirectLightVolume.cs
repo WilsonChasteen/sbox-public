@@ -23,8 +23,7 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		if ( Mode != GIMode.Dazzle ) return;
 		if ( stage != Sandbox.Rendering.Stage.AfterOpaque ) return;
 
-		var giSystem = GameObject.Scene.GetSystem<DazzleGISystem>();
-		giSystem?.Dispatch( this, camera.SceneCamera );
+		DazzleGISystem.Current?.Dispatch( this, camera.SceneCamera );
 	}
 
 	/// <summary>

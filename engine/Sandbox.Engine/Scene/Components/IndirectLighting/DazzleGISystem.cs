@@ -4,10 +4,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Threading;
 using Sandbox.Rendering;
 
-[StructLayout( LayoutKind.Sequential, Pack = 16 )]
+[StructLayout( LayoutKind.Sequential )]
 public struct DazzleSurfel
 {
 	public Vector3 Position;
@@ -16,15 +15,10 @@ public struct DazzleSurfel
 	public Vector3 Radiance;
 	public float Radius;
 	public uint LastUsedFrame;
-	public float Padding1;
-	public float Padding2;
-	public float Padding3;
-	public float Padding4;
-	public float Padding5;
-	public float Padding6;
+	public Vector3 Padding;
 }
 
-[StructLayout( LayoutKind.Sequential, Pack = 16 )]
+[StructLayout( LayoutKind.Sequential )]
 public struct DazzleReservoir
 {
 	public Vector3 Radiance;
@@ -42,7 +36,7 @@ public struct DazzleReservoir
 /// </summary>
 sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 {
-	internal class DazzleVolumeResources : IDisposable
+	internal struct DazzleVolumeResources : IDisposable
 	{
 		public Texture Cascades;
 		public GpuBuffer<DazzleReservoir> ReservoirBuffer;
@@ -108,10 +102,6 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 	private Dictionary<Guid, DazzleVolumeResources> _volumeResources = new();
 	private Dictionary<Guid, float> _nextTraceLogTime = new();
 	private Dictionary<Guid, int> _lastUpdateFrame = new();
-	private int _frameCounter = 0;
-
-	private readonly object _lock = new();
-	private readonly uint[] _debugCounterBuffer = new uint[DebugCounterCount];
 
 	public DazzleGISystem( Scene scene ) : base( scene )
 	{
@@ -120,24 +110,17 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 
 	public bool GetResources( Guid volumeId, out DazzleVolumeResources resources )
 	{
-		lock ( _lock )
-		{
-			return _volumeResources.TryGetValue( volumeId, out resources );
-		}
+		return _volumeResources.TryGetValue( volumeId, out resources );
 	}
 
 	public override void Dispose()
 	{
-		lock ( _lock )
+		foreach ( var resources in _volumeResources.Values )
 		{
-			foreach ( var resources in _volumeResources.Values )
-			{
-				resources.Dispose();
-			}
-			_volumeResources.Clear();
-			_nextTraceLogTime.Clear();
-			_lastUpdateFrame.Clear();
+			resources.Dispose();
 		}
+		_volumeResources.Clear();
+		_nextTraceLogTime.Clear();
 
 		base.Dispose();
 	}
@@ -151,33 +134,25 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 			.Where( x => x.Active && x.Mode == IndirectLightVolume.GIMode.Dazzle )
 			.ToList();
 
-		var volumeBindingsChanged = false;
-
-		lock ( _lock )
+		// Cleanup removed volumes
+		var activeIds = volumes.Select( x => x.Id ).ToHashSet();
+		var toRemove = _volumeResources.Keys.Where( id => !activeIds.Contains( id ) ).ToList();
+		var volumeBindingsChanged = toRemove.Count > 0;
+		foreach ( var id in toRemove )
 		{
-			// Cleanup removed volumes
-			var activeIds = volumes.Select( x => x.Id ).ToHashSet();
-			var toRemove = _volumeResources.Keys.Where( id => !activeIds.Contains( id ) ).ToList();
-			volumeBindingsChanged = toRemove.Count > 0;
-			foreach ( var id in toRemove )
-			{
-				_volumeResources[id].Dispose();
-				_volumeResources.Remove( id );
-				_nextTraceLogTime.Remove( id );
-				_lastUpdateFrame.Remove( id );
-			}
+			_volumeResources[id].Dispose();
+			_volumeResources.Remove( id );
+			_nextTraceLogTime.Remove( id );
+		}
 
-			foreach ( var volume in volumes )
+		foreach ( var volume in volumes )
+		{
+			if ( !_volumeResources.TryGetValue( volume.Id, out var resources ) )
 			{
-				if ( !_volumeResources.TryGetValue( volume.Id, out var resources ) )
-				{
-					resources = CreateResources( volume );
-					_volumeResources[volume.Id] = resources;
-					volumeBindingsChanged = true;
-				}
+				resources = CreateResources( volume );
+				_volumeResources[volume.Id] = resources;
+				volumeBindingsChanged = true;
 			}
-
-			_frameCounter++;
 		}
 
 		if ( volumeBindingsChanged )
@@ -192,19 +167,12 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 	/// </summary>
 	public void Dispatch( IndirectLightVolume volume, SceneCamera camera )
 	{
-		DazzleVolumeResources resources;
-		bool needsWorldUpdate;
-		int frame;
+		if ( !_volumeResources.TryGetValue( volume.Id, out var resources ) )
+			return;
 
-		lock ( _lock )
-		{
-			if ( !_volumeResources.TryGetValue( volume.Id, out resources ) )
-				return;
-
-			frame = _frameCounter;
-			needsWorldUpdate = !_lastUpdateFrame.TryGetValue( volume.Id, out var lastFrame ) || lastFrame != frame;
-			_lastUpdateFrame[volume.Id] = frame;
-		}
+		var frame = Time.FrameCount;
+		var needsWorldUpdate = !_lastUpdateFrame.TryGetValue( volume.Id, out var lastFrame ) || lastFrame != frame;
+		_lastUpdateFrame[volume.Id] = frame;
 
 		if ( needsWorldUpdate )
 		{
@@ -301,10 +269,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		var attrs = RenderAttributes.Pool.Get();
 
 		// Merge existing render attributes (contains G-buffer textures like "Color" and "DepthChainDownsample")
-		if ( Graphics.Attributes is not null )
-		{
-			Graphics.Attributes.MergeTo( attrs );
-		}
+		Graphics.Attributes.MergeTo( attrs );
 
 		attrs.Set( "SurfelBuffer", resources.SurfelBuffer );
 		attrs.Set( "SurfelCountBuffer", resources.SurfelCountBuffer );
@@ -319,12 +284,6 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		var width = (int)camera.Size.x;
 		var height = (int)camera.Size.y;
 		attrs.Set( "ScreenSize", new Vector2Int( width, height ) );
-
-		if ( width < 1 || height < 1 )
-		{
-			RenderAttributes.Pool.Return( attrs );
-			return;
-		}
 
 		// 1. Manage (Spawn)
 		var dispatchX = (width + 7) / 8;
@@ -413,69 +372,71 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 
 	private void TracePipelineIfEnabled( IndirectLightVolume volume, DazzleVolumeResources resources )
 	{
-		if ( !volume.EnablePipelineTrace ) return;
-
-		var now = (float)Time.Now;
-		var interval = MathF.Max( 0.1f, volume.PipelineTraceInterval );
-
-		lock ( _lock )
+		if ( !volume.EnablePipelineTrace )
 		{
-			if ( _nextTraceLogTime.TryGetValue( volume.Id, out var nextLogAt ) && now < nextLogAt )
-				return;
-
-			_nextTraceLogTime[volume.Id] = now + interval;
-			resources.DebugCounters.GetData( _debugCounterBuffer.AsSpan() );
+			_nextTraceLogTime.Remove( volume.Id );
+			return;
 		}
 
-		LogPipelineTrace( volume, _debugCounterBuffer );
-	}
+		var now = (float)Time.Now;
+		if ( _nextTraceLogTime.TryGetValue( volume.Id, out var nextLogAt ) && now < nextLogAt )
+			return;
 
-	private void LogPipelineTrace( IndirectLightVolume volume, uint[] counters )
-	{
-		var vA = Counter( counters, DebugCounterIndex.SdfSeedActive );
-		var vT = Counter( counters, DebugCounterIndex.SdfSeedVoxels );
-		var fV = Counter( counters, DebugCounterIndex.SdfFinalizeValid );
-		var fT = Counter( counters, DebugCounterIndex.SdfFinalizeVoxels );
-		var jU = Counter( counters, DebugCounterIndex.SdfJfaUpdates );
+		var interval = MathF.Max( 0.1f, volume.PipelineTraceInterval );
+		_nextTraceLogTime[volume.Id] = now + interval;
 
-		var sH = Counter( counters, DebugCounterIndex.SurfelManageDepthHits );
-		var sP = Counter( counters, DebugCounterIndex.SurfelManagePixels );
-		var sV = Counter( counters, DebugCounterIndex.SurfelManageInVolume );
-		var sS = Counter( counters, DebugCounterIndex.SurfelManageSpawned );
-		var sC = Counter( counters, DebugCounterIndex.SurfelCount );
-		var sL = Counter( counters, DebugCounterIndex.SurfelLightingNonZero );
-		var sT = Counter( counters, DebugCounterIndex.SurfelLightingThreads );
+		Span<uint> counters = stackalloc uint[DebugCounterCount];
+		resources.DebugCounters.GetData( counters );
 
-		var tR = Counter( counters, DebugCounterIndex.TraceRays );
-		var tH = Counter( counters, DebugCounterIndex.TraceHits );
-		var tM = Counter( counters, DebugCounterIndex.TraceMisses );
-		var tS = Counter( counters, DebugCounterIndex.TraceSteps );
-		var tN = Counter( counters, DebugCounterIndex.TraceNonZeroRadiance );
+		var sdfSeedVoxels = Counter( counters, DebugCounterIndex.SdfSeedVoxels );
+		var sdfSeedActive = Counter( counters, DebugCounterIndex.SdfSeedActive );
+		var sdfJfaUpdates = Counter( counters, DebugCounterIndex.SdfJfaUpdates );
+		var sdfFinalizeVoxels = Counter( counters, DebugCounterIndex.SdfFinalizeVoxels );
+		var sdfFinalizeValid = Counter( counters, DebugCounterIndex.SdfFinalizeValid );
 
-		var mS = Counter( counters, DebugCounterIndex.MergeSamples );
-		var mD = Counter( counters, DebugCounterIndex.MergeDirs );
-		var rC = Counter( counters, DebugCounterIndex.ReservoirCells );
-		var rN = Counter( counters, DebugCounterIndex.ReservoirNonZeroCandidates );
-		var rR = Counter( counters, DebugCounterIndex.ReservoirReplacements );
+		var surfelManagePixels = Counter( counters, DebugCounterIndex.SurfelManagePixels );
+		var surfelManageDepthHits = Counter( counters, DebugCounterIndex.SurfelManageDepthHits );
+		var surfelManageInVolume = Counter( counters, DebugCounterIndex.SurfelManageInVolume );
+		var surfelManageSpawned = Counter( counters, DebugCounterIndex.SurfelManageSpawned );
+		var surfelCount = Counter( counters, DebugCounterIndex.SurfelCount );
+		var surfelLightingThreads = Counter( counters, DebugCounterIndex.SurfelLightingThreads );
+		var surfelLightingNonZero = Counter( counters, DebugCounterIndex.SurfelLightingNonZero );
+
+		var traceRays = Counter( counters, DebugCounterIndex.TraceRays );
+		var traceHits = Counter( counters, DebugCounterIndex.TraceHits );
+		var traceMisses = Counter( counters, DebugCounterIndex.TraceMisses );
+		var traceSteps = Counter( counters, DebugCounterIndex.TraceSteps );
+		var traceNonZero = Counter( counters, DebugCounterIndex.TraceNonZeroRadiance );
+
+		var mergeDirs = Counter( counters, DebugCounterIndex.MergeDirs );
+		var mergeSamples = Counter( counters, DebugCounterIndex.MergeSamples );
+		var reservoirCells = Counter( counters, DebugCounterIndex.ReservoirCells );
+		var reservoirNonZeroCandidates = Counter( counters, DebugCounterIndex.ReservoirNonZeroCandidates );
+		var reservoirReplacements = Counter( counters, DebugCounterIndex.ReservoirReplacements );
 
 		var volumeName = volume.GameObject?.Name ?? volume.Id.ToString();
 		Log.Info(
 			$"Dazzle Trace [{volumeName}] " +
-			$"SDF active={vA}/{vT} ({RatioPercent( vA, vT ):0.0}%) " +
-			$"finalValid={fV}/{fT} ({RatioPercent( fV, fT ):0.0}%) " +
-			$"jfaUpdates={jU}; " +
-			$"Surfels depthHits={sH}/{sP} inVolume={sV} spawned={sS} live={sC} lit={sL}/{sT}; " +
-			$"Trace rays={tR} hits={tH} misses={tM} nonZero={tN} stepsPerRay={Ratio( tS, tR ):0.00}; " +
-			$"Merge samples={mS}/{mD}; " +
-			$"Reservoir cells={rC} nonZeroCandidates={rN} replacements={rR}."
+			$"SDF active={sdfSeedActive}/{sdfSeedVoxels} ({RatioPercent( sdfSeedActive, sdfSeedVoxels ):0.0}%) " +
+			$"finalValid={sdfFinalizeValid}/{sdfFinalizeVoxels} ({RatioPercent( sdfFinalizeValid, sdfFinalizeVoxels ):0.0}%) " +
+			$"jfaUpdates={sdfJfaUpdates}; " +
+			$"Surfels depthHits={surfelManageDepthHits}/{surfelManagePixels} inVolume={surfelManageInVolume} spawned={surfelManageSpawned} live={surfelCount} lit={surfelLightingNonZero}/{surfelLightingThreads}; " +
+			$"Trace rays={traceRays} hits={traceHits} misses={traceMisses} nonZero={traceNonZero} stepsPerRay={Ratio( traceSteps, traceRays ):0.00}; " +
+			$"Merge samples={mergeSamples}/{mergeDirs}; " +
+			$"Reservoir cells={reservoirCells} nonZeroCandidates={reservoirNonZeroCandidates} replacements={reservoirReplacements}."
 		);
 
 		var hints = new List<string>();
-		if ( vA == 0 ) hints.Add( "voxelization produced no occupied cells" );
-		if ( sC == 0 ) hints.Add( "no surfels alive after manage/fixup" );
-		if ( tR > 0 && tH == 0 ) hints.Add( "cascade rays miss all occupancy" );
-		if ( tH > 0 && tN == 0 ) hints.Add( "ray hits found but radiance stayed black" );
-		if ( rC > 0 && rN == 0 ) hints.Add( "reservoir candidates are all zero energy" );
+		if ( sdfSeedActive == 0 )
+			hints.Add( "voxelization produced no occupied cells" );
+		if ( surfelCount == 0 )
+			hints.Add( "no surfels alive after manage/fixup" );
+		if ( traceRays > 0 && traceHits == 0 )
+			hints.Add( "cascade rays miss all occupancy" );
+		if ( traceHits > 0 && traceNonZero == 0 )
+			hints.Add( "ray hits found but radiance stayed black" );
+		if ( reservoirCells > 0 && reservoirNonZeroCandidates == 0 )
+			hints.Add( "reservoir candidates are all zero energy" );
 
 		if ( hints.Count > 0 )
 		{
@@ -483,7 +444,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		}
 	}
 
-	private static uint Counter( uint[] counters, DebugCounterIndex index )
+	private static uint Counter( ReadOnlySpan<uint> counters, DebugCounterIndex index )
 	{
 		var i = (int)index;
 		return i >= 0 && i < counters.Length ? counters[i] : 0u;
