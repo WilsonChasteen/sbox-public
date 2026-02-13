@@ -12,19 +12,28 @@ MODES
 COMMON
 {
 	#include "common/shared.hlsl"
+	#include "common/Dazzle/DazzleShared.hlsl"
 }
 
 CS
 {
 	RWTexture3D<float4> DestSDF < Attribute( "DestSDF" ); >;
 	Texture3D SourceSDF < Attribute( "SourceSDF" ); >;
+	RWStructuredBuffer<uint> DazzleDebugCounters < Attribute( "DazzleDebugCounters" ); >;
 	int StepSize < Attribute( "StepSize" ); >;
 	int3 GridSize < Attribute( "GridSize" ); >;
+
+	void DbgAdd( uint index, uint value )
+	{
+		uint original;
+		InterlockedAdd( DazzleDebugCounters[index], value, original );
+	}
 
 	[numthreads( 8, 8, 8 )]
 	void MainCs( uint3 id : SV_DispatchThreadID )
 	{
 		if ( any( id >= GridSize ) ) return;
+		DbgAdd( DAZZLE_DBG_SDF_JFA_VOXELS, 1u );
 
 		float4 best = SourceSDF.Load( int4( id, 0 ) );
 		float bestDistSq = 1e30f;
@@ -58,6 +67,7 @@ CS
 						float distSq = dot( diff, diff );
 						if ( distSq < bestDistSq )
 						{
+							DbgAdd( DAZZLE_DBG_SDF_JFA_UPDATES, 1u );
 							bestDistSq = distSq;
 							best = val;
 						}

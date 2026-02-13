@@ -19,12 +19,20 @@ CS
 {
 	RWStructuredBuffer<DazzleReservoir> ReservoirBuffer < Attribute( "ReservoirBuffer" ); >;
 	Texture2D<float4> CascadeAtlas < Attribute( "CascadeAtlas" ); >;
+	RWStructuredBuffer<uint> DazzleDebugCounters < Attribute( "DazzleDebugCounters" ); >;
 
 	float3 VolumeMin < Attribute( "VolumeMin" ); >;
 	float3 VolumeMax < Attribute( "VolumeMax" ); >;
 	float ReservoirCellSize < Attribute( "ReservoirCellSize" ); >;
 	uint MaxReservoirs < Attribute( "MaxReservoirs" ); >;
 	uint CurrentEpoch < Attribute( "CurrentEpoch" ); >;
+	int BaseDirections < Attribute( "BaseDirections" ); >;
+
+	void DbgAdd( uint index, uint value )
+	{
+		uint original;
+		InterlockedAdd( DazzleDebugCounters[index], value, original );
+	}
 
 	uint GetHash( int3 pos )
 	{
@@ -42,8 +50,7 @@ CS
 		// id.xyz represents a grid cell in the volume
 		int3 probeCounts = int3( 16, 16, 16 );
 		if ( any( (int3)id >= probeCounts ) ) return;
-
-		float3 posWs = VolumeMin + ( (float3)id + 0.5f ) * ( ( VolumeMax - VolumeMin ) / 16.0f );
+		DbgAdd( DAZZLE_DBG_RESERVOIR_CELLS, 1u );
 
 		uint hash = GetHash( (int3)id );
 		uint resIdx = hash % MaxReservoirs;
@@ -58,19 +65,30 @@ CS
 			r.Epoch = CurrentEpoch;
 		}
 
-		// Resample from Cascades
-		// In a real implementation, we'd draw multiple candidates
-		uint2 cascadePos = uint2( id.x + id.z * 16, id.y + 0 * 16 ); // Sample dir 0 for now
-		float4 cascadeVal = CascadeAtlas.Load( int3( cascadePos, 0 ) );
-
-		float3 candidateRadiance = cascadeVal.rgb;
+		// Resample from several level-0 cascade directions to avoid single-direction starvation.
+		uint numDirs = max( (uint)BaseDirections, 1u );
+		float3 candidateRadiance = 0.0f;
+		const uint candidateSamples = 4u;
+		[unroll]
+		for ( uint s = 0u; s < candidateSamples; ++s )
+		{
+			uint dir = ( hash + s * 977u ) % numDirs;
+			uint2 cascadePos = uint2( id.x + id.z * 16u, id.y + dir * 16u );
+			candidateRadiance += CascadeAtlas.Load( int3( cascadePos, 0 ) ).rgb;
+		}
+		candidateRadiance *= rcp( (float)candidateSamples );
 		float candidateWeight = length( candidateRadiance );
+		if ( candidateWeight > 0.0f )
+		{
+			DbgAdd( DAZZLE_DBG_RESERVOIR_NONZERO_CANDIDATES, 1u );
+		}
 
 		// Update reservoir (Simplified ReSTIR)
 		r.W_sum += candidateWeight;
 		r.M += 1;
 		if ( SimpleHash( (float)hash + g_flTime ) < ( candidateWeight / max( r.W_sum, 0.0001f ) ) )
 		{
+			DbgAdd( DAZZLE_DBG_RESERVOIR_REPLACEMENTS, 1u );
 			r.Radiance = candidateRadiance;
 			r.Direction = float3( 0, 1, 0 ); // Should be the actual direction
 		}

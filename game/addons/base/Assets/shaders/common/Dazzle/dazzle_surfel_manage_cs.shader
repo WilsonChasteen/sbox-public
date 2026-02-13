@@ -20,8 +20,9 @@ COMMON
 CS
 {
 	RWStructuredBuffer<DazzleSurfel> SurfelBuffer < Attribute( "SurfelBuffer" ); >;
-	RWByteAddressBuffer SurfelCountBuffer < Attribute( "SurfelCountBuffer" ); >;
+	RWStructuredBuffer<uint> SurfelCountBuffer < Attribute( "SurfelCountBuffer" ); >;
 	RWTexture3D<uint> SurfelHashGrid < Attribute( "SurfelHashGrid" ); >;
+	RWStructuredBuffer<uint> DazzleDebugCounters < Attribute( "DazzleDebugCounters" ); >;
 
 	Texture2D g_tColor < Attribute( "Color" ); >;
 
@@ -30,53 +31,70 @@ CS
 	float3 VolumeMin < Attribute( "VolumeMin" ); >;
 	float3 VolumeMax < Attribute( "VolumeMax" ); >;
 	int3 HashGridSize < Attribute( "HashGridSize" ); >;
+	int2 ScreenSize < Attribute( "ScreenSize" ); >;
+
+	void DbgAdd( uint index, uint value )
+	{
+		uint original;
+		InterlockedAdd( DazzleDebugCounters[index], value, original );
+	}
 
 	[numthreads( 8, 8, 1 )]
 	void MainCs( uint3 id : SV_DispatchThreadID )
 	{
-		// Only sample every Nth pixel to save performance
-		if ( ( id.x % 16 != 0 ) || ( id.y % 16 != 0 ) ) return;
+		if ( any( (int2)id.xy >= ScreenSize ) ) return;
+
+		// Subsample the screen for stability/performance without starving surfel coverage.
+		if ( ( id.x % 4 != 0 ) || ( id.y % 4 != 0 ) ) return;
+		DbgAdd( DAZZLE_DBG_SURFEL_MANAGE_PIXELS, 1u );
 
 		float depth = Depth::Get( id.xy );
 		if ( depth >= 1.0f ) return;
+		DbgAdd( DAZZLE_DBG_SURFEL_MANAGE_DEPTH_HITS, 1u );
 
-		float2 uv = ( (float2)id.xy + 0.5f ) * g_vInvViewportSize.xy;
-		float3 posPs = float3( uv * 2.0f - 1.0f, depth );
-		posPs.y *= -1.0f;
-		float4 posWs4 = mul( g_matProjectionToWorld, float4( posPs, 1.0f ) );
-		float3 posWs = posWs4.xyz / posWs4.w;
-
-		if ( any( posWs < VolumeMin ) || any( posWs > VolumeMax ) ) return;
+		float3 posWs = Depth::GetWorldPosition( id.xy );
+		if ( any( isnan( posWs ) ) || any( isinf( posWs ) ) ) return;
+		float3 volumeSize = VolumeMax - VolumeMin;
+		if ( any( volumeSize <= 1e-6f.xxx ) ) return;
+		float3 posLocal = ( posWs - VolumeMin ) / volumeSize;
+		if ( any( posLocal < 0.0f.xxx ) || any( posLocal > 1.0f.xxx ) ) return;
+		DbgAdd( DAZZLE_DBG_SURFEL_MANAGE_IN_VOLUME, 1u );
 
 		float3 normalWs = Normals::Sample( id.xy );
-		float3 albedo = g_tColor.Load( int3( id.xy, 0 ) ).rgb;
-
-		// Check if covered by existing surfel
-		float3 posLocal = ( posWs - VolumeMin ) / ( VolumeMax - VolumeMin );
-		int3 hashPos = int3( posLocal * HashGridSize );
-
-		uint cellValue;
-		InterlockedCompareExchange( SurfelHashGrid[hashPos], 0, 1, cellValue );
-
-		if ( cellValue == 0 )
+		float nLenSq = dot( normalWs, normalWs );
+		if ( nLenSq < 1e-6f || any( isnan( normalWs ) ) || any( isinf( normalWs ) ) )
 		{
-			// Spawn new surfel
-			uint index;
-			SurfelCountBuffer.InterlockedAdd( 0, 1, index );
+			normalWs = float3( 0.0f, 0.0f, 1.0f );
+		}
+		else
+		{
+			normalWs *= rsqrt( nLenSq );
+		}
+		float3 albedo = g_tColor.Load( int3( id.xy, 0 ) ).rgb;
+		if ( all( albedo <= 0.0f.xxx ) )
+		{
+			albedo = 0.7f.xxx;
+		}
 
-			if ( index < MaxSurfels )
-			{
-				DazzleSurfel s;
-				s.Position = posWs;
-				s.Normal = normalWs;
-				s.Albedo = albedo;
-				s.Radiance = 0;
-				s.Radius = SurfelRadius;
-				s.LastUsedFrame = (uint)g_flTime;
-				SurfelBuffer[index] = s;
+		int3 maxHashPos = max( HashGridSize - 1, int3( 0, 0, 0 ) );
+		int3 hashPos = clamp( int3( posLocal * HashGridSize ), int3( 0, 0, 0 ), maxHashPos );
 
-				SurfelHashGrid[hashPos] = index + 1;
-			}
+		uint index;
+		InterlockedAdd( SurfelCountBuffer[0], 1u, index );
+
+		if ( index < MaxSurfels )
+		{
+			DbgAdd( DAZZLE_DBG_SURFEL_MANAGE_SPAWNED, 1u );
+			DazzleSurfel s;
+			s.Position = posWs;
+			s.Normal = normalWs;
+			s.Albedo = albedo;
+			s.Radiance = 0;
+			s.Radius = SurfelRadius;
+			s.LastUsedFrame = (uint)g_flTime;
+			SurfelBuffer[index] = s;
+
+			SurfelHashGrid[hashPos] = index + 1;
 		}
 	}
 }

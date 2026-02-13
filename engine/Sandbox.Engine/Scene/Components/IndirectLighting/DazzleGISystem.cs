@@ -41,6 +41,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		public Texture Cascades;
 		public GpuBuffer<DazzleReservoir> ReservoirBuffer;
 		public Texture SDF;
+		public GpuBuffer<uint> DebugCounters;
 
 		public GpuBuffer<DazzleSurfel> SurfelBuffer;
 		public GpuBuffer<uint> SurfelCountBuffer;
@@ -56,6 +57,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 			Cascades?.Dispose();
 			ReservoirBuffer?.Dispose();
 			SDF?.Dispose();
+			DebugCounters?.Dispose();
 			SurfelBuffer?.Dispose();
 			SurfelCountBuffer?.Dispose();
 			SurfelDispatchBuffer?.Dispose();
@@ -66,7 +68,39 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		}
 	}
 
+	private enum DebugCounterIndex
+	{
+		SdfSeedVoxels = 0,
+		SdfSeedActive = 1,
+		SdfJfaVoxels = 2,
+		SdfJfaUpdates = 3,
+		SdfFinalizeVoxels = 4,
+		SdfFinalizeValid = 5,
+		SurfelManagePixels = 6,
+		SurfelManageDepthHits = 7,
+		SurfelManageSpawned = 8,
+		SurfelLightingThreads = 9,
+		SurfelLightingNonZero = 10,
+		TraceRays = 11,
+		TraceHits = 12,
+		TraceMisses = 13,
+		TraceSteps = 14,
+		TraceNonZeroRadiance = 15,
+		MergeDirs = 16,
+		MergeSamples = 17,
+		ReservoirCells = 18,
+		ReservoirNonZeroCandidates = 19,
+		ReservoirReplacements = 20,
+		SurfelCount = 21,
+		SurfelManageInVolume = 22,
+	}
+
+	private const int DebugCounterCount = 32;
+	private static readonly uint[] DebugCounterZeroData = new uint[DebugCounterCount];
+	private static readonly uint[] SurfelCountZeroData = new uint[1];
+
 	private Dictionary<Guid, DazzleVolumeResources> _volumeResources = new();
+	private Dictionary<Guid, float> _nextTraceLogTime = new();
 
 	public DazzleGISystem( Scene scene ) : base( scene )
 	{
@@ -85,6 +119,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 			resources.Dispose();
 		}
 		_volumeResources.Clear();
+		_nextTraceLogTime.Clear();
 
 		base.Dispose();
 	}
@@ -101,30 +136,48 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		// Cleanup removed volumes
 		var activeIds = volumes.Select( x => x.Id ).ToHashSet();
 		var toRemove = _volumeResources.Keys.Where( id => !activeIds.Contains( id ) ).ToList();
+		var volumeBindingsChanged = toRemove.Count > 0;
 		foreach ( var id in toRemove )
 		{
 			_volumeResources[id].Dispose();
 			_volumeResources.Remove( id );
+			_nextTraceLogTime.Remove( id );
 		}
 
 		foreach ( var volume in volumes )
 		{
-			UpdateVolume( volume );
+			if ( UpdateVolume( volume ) )
+			{
+				volumeBindingsChanged = true;
+			}
+		}
+
+		if ( volumeBindingsChanged )
+		{
+			Scene.Get<DDGIVolumeSystem>()?.MarkDirty();
 		}
 	}
 
-	private void UpdateVolume( IndirectLightVolume volume )
+	private bool UpdateVolume( IndirectLightVolume volume )
 	{
+		var createdResources = false;
+
 		if ( !_volumeResources.TryGetValue( volume.Id, out var resources ) )
 		{
 			resources = CreateResources( volume );
 			_volumeResources[volume.Id] = resources;
+			createdResources = true;
 		}
 
-		UpdateSDF( volume, resources );
+		resources.DebugCounters.SetData( DebugCounterZeroData.AsSpan() );
+
 		UpdateSurfels( volume, resources );
+		UpdateSDF( volume, resources );
 		UpdateCascades( volume, resources );
 		UpdateReservoirs( volume, resources );
+		TracePipelineIfEnabled( volume, resources );
+
+		return createdResources;
 	}
 
 	private static ComputeShader ClearShader = new( "common/Dazzle/dazzle_clear_cs" );
@@ -142,14 +195,14 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		RenderAttributes.Pool.Return( clearAttrs );
 
 		var bounds = volume.Bounds.Transform( volume.WorldTransform );
-
-		// TODO: Implement proper voxelization if needed, for now we assume it's done elsewhere or just skip
-		// since MaterialOverride and OrthoWidth are missing from SceneCamera.
+		// Camera-based voxelization path is temporarily disabled for stability on Vulkan.
 
 		// 2. JFA Seed
 		var jfaAttrs = RenderAttributes.Pool.Get();
 		jfaAttrs.Set( "VoxelGrid", resources.VoxelGrid );
+		jfaAttrs.Set( "SurfelHashGrid", resources.SurfelHashGrid );
 		jfaAttrs.Set( "DestSDF", resources.JfaPing );
+		jfaAttrs.Set( "DazzleDebugCounters", resources.DebugCounters );
 		jfaAttrs.Set( "GridSize", gridVec );
 		JfaSeedShader.DispatchWithAttributes( jfaAttrs, gridSize, gridSize, gridSize );
 
@@ -191,7 +244,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		ClearShader.DispatchWithAttributes( clearAttrs, gridSize, gridSize, gridSize );
 		RenderAttributes.Pool.Return( clearAttrs );
 
-		resources.SurfelCountBuffer.SetCounterValue( 0 );
+		resources.SurfelCountBuffer.SetData( SurfelCountZeroData.AsSpan() );
 
 		var bounds = volume.Bounds.Transform( volume.WorldTransform );
 
@@ -199,23 +252,23 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		attrs.Set( "SurfelBuffer", resources.SurfelBuffer );
 		attrs.Set( "SurfelCountBuffer", resources.SurfelCountBuffer );
 		attrs.Set( "SurfelHashGrid", resources.SurfelHashGrid );
+		attrs.Set( "DazzleDebugCounters", resources.DebugCounters );
 		attrs.Set( "MaxSurfels", (uint)resources.SurfelBuffer.ElementCount );
 		attrs.Set( "SurfelRadius", volume.ReservoirCellSize * volume.SurfelDensity );
 		attrs.Set( "VolumeMin", bounds.Mins );
 		attrs.Set( "VolumeMax", bounds.Maxs );
 		attrs.Set( "HashGridSize", gridVec );
+		attrs.Set( "ScreenSize", new Vector2Int( (int)Screen.Width, (int)Screen.Height ) );
 
 		// 1. Manage (Spawn)
-		SurfelManageShader.DispatchWithAttributes( attrs, (int)Screen.Width, (int)Screen.Height, 1 );
+		var dispatchX = ((int)Screen.Width + 7) / 8;
+		var dispatchY = ((int)Screen.Height + 7) / 8;
+		SurfelManageShader.DispatchWithAttributes( attrs, dispatchX, dispatchY, 1 );
 
-		// 2. Copy count and fixup dispatch
-		var countCopy = new GpuBuffer<uint>( 1, GpuBuffer.UsageFlags.ByteAddress );
-		resources.SurfelCountBuffer.CopyStructureCount( countCopy );
-
-		attrs.Set( "CountBuffer", countCopy );
+		// 2. Fixup dispatch dimensions from the current surfel count
+		attrs.Set( "CountBuffer", resources.SurfelCountBuffer );
 		attrs.Set( "DispatchBuffer", resources.SurfelDispatchBuffer );
 		SurfelFixupShader.DispatchWithAttributes( attrs, 1, 1, 1 );
-		countCopy.Dispose();
 
 		// 3. Lighting
 		SurfelLightingShader.DispatchIndirectWithAttributes( attrs, resources.SurfelDispatchBuffer );
@@ -225,38 +278,41 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 	private static ComputeShader JfaSeedShader = new( "common/Dazzle/dazzle_sdf_seed" );
 	private static ComputeShader JfaStepShader = new( "common/Dazzle/dazzle_sdf_jfa" );
 	private static ComputeShader JfaFinalizeShader = new( "common/Dazzle/dazzle_sdf_finalize" );
-	private static Material VoxelizeMaterial = Material.FromShader( "common/Dazzle/dazzle_voxelize" );
 
 	private void UpdateCascades( IndirectLightVolume volume, DazzleVolumeResources resources )
 	{
 		var bounds = volume.Bounds.Transform( volume.WorldTransform );
+		var totalLevels = Math.Clamp( volume.CascadeLevels, 1, 8 );
 
 		var attrs = RenderAttributes.Pool.Get();
 		attrs.Set( "CascadeAtlas", resources.Cascades );
 		attrs.Set( "SDF", resources.SDF );
+		attrs.Set( "SurfelBuffer", resources.SurfelBuffer );
+		attrs.Set( "SurfelHashGrid", resources.SurfelHashGrid );
+		attrs.Set( "DazzleDebugCounters", resources.DebugCounters );
 		attrs.Set( "VolumeMin", bounds.Mins );
 		attrs.Set( "VolumeMax", bounds.Maxs );
-		attrs.Set( "TotalLevels", volume.CascadeLevels );
+		attrs.Set( "HashGridSize", new Vector3Int( resources.SurfelHashGrid.Width, resources.SurfelHashGrid.Height, resources.SurfelHashGrid.Depth ) );
+		attrs.Set( "MaxSurfels", (uint)resources.SurfelBuffer.ElementCount );
+		attrs.Set( "TotalLevels", totalLevels );
 		attrs.Set( "BaseDirections", volume.BaseDirections );
 
-		// 1. Trace all levels
-		for ( int l = 0; l < volume.CascadeLevels; l++ )
+		// 1. Trace all levels (atlas writes are level-packed in shader).
+		for ( int l = 0; l < totalLevels; l++ )
 		{
 			attrs.Set( "CascadeLevel", l );
-			var shift = l;
-			Vector3Int probeCounts = new Vector3Int( Math.Max( 1, 16 >> shift ), Math.Max( 1, 16 >> shift ), Math.Max( 1, 16 >> shift ) );
-			CascadeTraceShader.DispatchWithAttributes( attrs, probeCounts.x, probeCounts.y, probeCounts.z );
+			var probeDim = Math.Max( 1, 16 >> l );
+			CascadeTraceShader.DispatchWithAttributes( attrs, probeDim, probeDim, probeDim );
 		}
 
-		// 2. Merge levels
-		for ( int l = volume.CascadeLevels - 2; l >= 0; l-- )
+		// 2. Merge from coarsest traced level down to level 0.
+		for ( int l = totalLevels - 2; l >= 0; l-- )
 		{
 			attrs.Set( "CascadeLevel", l );
-			attrs.Set( "BaseDirections", volume.BaseDirections );
-			var shift = l;
-			Vector3Int probeCounts = new Vector3Int( Math.Max( 1, 16 >> shift ), Math.Max( 1, 16 >> shift ), Math.Max( 1, 16 >> shift ) );
-			CascadeMergeShader.DispatchWithAttributes( attrs, probeCounts.x, probeCounts.y, probeCounts.z );
+			var probeDim = Math.Max( 1, 16 >> l );
+			CascadeMergeShader.DispatchWithAttributes( attrs, probeDim, probeDim, probeDim );
 		}
+
 		RenderAttributes.Pool.Return( attrs );
 	}
 
@@ -274,17 +330,109 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		var attrs = RenderAttributes.Pool.Get();
 		attrs.Set( "ReservoirBuffer", resources.ReservoirBuffer );
 		attrs.Set( "CascadeAtlas", resources.Cascades );
+		attrs.Set( "DazzleDebugCounters", resources.DebugCounters );
 		attrs.Set( "VolumeMin", bounds.Mins );
 		attrs.Set( "VolumeMax", bounds.Maxs );
 		attrs.Set( "ReservoirCellSize", volume.ReservoirCellSize );
 		attrs.Set( "MaxReservoirs", (uint)resources.ReservoirBuffer.ElementCount );
 		attrs.Set( "CurrentEpoch", (uint)Time.Now ); // Simple epoch
+		attrs.Set( "BaseDirections", Math.Max( volume.BaseDirections, 1 ) );
 
 		ReservoirUpdateShader.DispatchWithAttributes( attrs, 16, 16, 16 );
 		RenderAttributes.Pool.Return( attrs );
 	}
 
 	private static ComputeShader ReservoirUpdateShader = new( "common/Dazzle/dazzle_reservoir_update_cs" );
+
+	private void TracePipelineIfEnabled( IndirectLightVolume volume, DazzleVolumeResources resources )
+	{
+		if ( !volume.EnablePipelineTrace )
+		{
+			_nextTraceLogTime.Remove( volume.Id );
+			return;
+		}
+
+		var now = (float)Time.Now;
+		if ( _nextTraceLogTime.TryGetValue( volume.Id, out var nextLogAt ) && now < nextLogAt )
+			return;
+
+		var interval = MathF.Max( 0.1f, volume.PipelineTraceInterval );
+		_nextTraceLogTime[volume.Id] = now + interval;
+
+		Span<uint> counters = stackalloc uint[DebugCounterCount];
+		resources.DebugCounters.GetData( counters );
+
+		var sdfSeedVoxels = Counter( counters, DebugCounterIndex.SdfSeedVoxels );
+		var sdfSeedActive = Counter( counters, DebugCounterIndex.SdfSeedActive );
+		var sdfJfaUpdates = Counter( counters, DebugCounterIndex.SdfJfaUpdates );
+		var sdfFinalizeVoxels = Counter( counters, DebugCounterIndex.SdfFinalizeVoxels );
+		var sdfFinalizeValid = Counter( counters, DebugCounterIndex.SdfFinalizeValid );
+
+		var surfelManagePixels = Counter( counters, DebugCounterIndex.SurfelManagePixels );
+		var surfelManageDepthHits = Counter( counters, DebugCounterIndex.SurfelManageDepthHits );
+		var surfelManageInVolume = Counter( counters, DebugCounterIndex.SurfelManageInVolume );
+		var surfelManageSpawned = Counter( counters, DebugCounterIndex.SurfelManageSpawned );
+		var surfelCount = Counter( counters, DebugCounterIndex.SurfelCount );
+		var surfelLightingThreads = Counter( counters, DebugCounterIndex.SurfelLightingThreads );
+		var surfelLightingNonZero = Counter( counters, DebugCounterIndex.SurfelLightingNonZero );
+
+		var traceRays = Counter( counters, DebugCounterIndex.TraceRays );
+		var traceHits = Counter( counters, DebugCounterIndex.TraceHits );
+		var traceMisses = Counter( counters, DebugCounterIndex.TraceMisses );
+		var traceSteps = Counter( counters, DebugCounterIndex.TraceSteps );
+		var traceNonZero = Counter( counters, DebugCounterIndex.TraceNonZeroRadiance );
+
+		var mergeDirs = Counter( counters, DebugCounterIndex.MergeDirs );
+		var mergeSamples = Counter( counters, DebugCounterIndex.MergeSamples );
+		var reservoirCells = Counter( counters, DebugCounterIndex.ReservoirCells );
+		var reservoirNonZeroCandidates = Counter( counters, DebugCounterIndex.ReservoirNonZeroCandidates );
+		var reservoirReplacements = Counter( counters, DebugCounterIndex.ReservoirReplacements );
+
+		var volumeName = volume.GameObject?.Name ?? volume.Id.ToString();
+		Log.Info(
+			$"Dazzle Trace [{volumeName}] " +
+			$"SDF active={sdfSeedActive}/{sdfSeedVoxels} ({RatioPercent( sdfSeedActive, sdfSeedVoxels ):0.0}%) " +
+			$"finalValid={sdfFinalizeValid}/{sdfFinalizeVoxels} ({RatioPercent( sdfFinalizeValid, sdfFinalizeVoxels ):0.0}%) " +
+			$"jfaUpdates={sdfJfaUpdates}; " +
+			$"Surfels depthHits={surfelManageDepthHits}/{surfelManagePixels} inVolume={surfelManageInVolume} spawned={surfelManageSpawned} live={surfelCount} lit={surfelLightingNonZero}/{surfelLightingThreads}; " +
+			$"Trace rays={traceRays} hits={traceHits} misses={traceMisses} nonZero={traceNonZero} stepsPerRay={Ratio( traceSteps, traceRays ):0.00}; " +
+			$"Merge samples={mergeSamples}/{mergeDirs}; " +
+			$"Reservoir cells={reservoirCells} nonZeroCandidates={reservoirNonZeroCandidates} replacements={reservoirReplacements}."
+		);
+
+		var hints = new List<string>();
+		if ( sdfSeedActive == 0 )
+			hints.Add( "voxelization produced no occupied cells" );
+		if ( surfelCount == 0 )
+			hints.Add( "no surfels alive after manage/fixup" );
+		if ( traceRays > 0 && traceHits == 0 )
+			hints.Add( "cascade rays miss all occupancy" );
+		if ( traceHits > 0 && traceNonZero == 0 )
+			hints.Add( "ray hits found but radiance stayed black" );
+		if ( reservoirCells > 0 && reservoirNonZeroCandidates == 0 )
+			hints.Add( "reservoir candidates are all zero energy" );
+
+		if ( hints.Count > 0 )
+		{
+			Log.Warning( $"Dazzle Trace [{volumeName}] Likely bottlenecks: {string.Join( "; ", hints )}." );
+		}
+	}
+
+	private static uint Counter( ReadOnlySpan<uint> counters, DebugCounterIndex index )
+	{
+		var i = (int)index;
+		return i >= 0 && i < counters.Length ? counters[i] : 0u;
+	}
+
+	private static float Ratio( uint numerator, uint denominator )
+	{
+		return denominator > 0u ? numerator / (float)denominator : 0.0f;
+	}
+
+	private static float RatioPercent( uint numerator, uint denominator )
+	{
+		return 100.0f * Ratio( numerator, denominator );
+	}
 
 	private DazzleVolumeResources CreateResources( IndirectLightVolume volume )
 	{
@@ -296,9 +444,10 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		{
 			Cascades = Texture.Create( 1024, 1024 ).WithUAVBinding().WithFormat( ImageFormat.RGBA16161616F ).Finish(),
 			ReservoirBuffer = new GpuBuffer<DazzleReservoir>( maxReservoirs ),
+			DebugCounters = new GpuBuffer<uint>( DebugCounterCount ),
 
 			SurfelBuffer = new GpuBuffer<DazzleSurfel>( maxSurfels ),
-			SurfelCountBuffer = new GpuBuffer<uint>( 1, GpuBuffer.UsageFlags.Append ),
+			SurfelCountBuffer = new GpuBuffer<uint>( 1 ),
 			SurfelDispatchBuffer = new GpuBuffer<GpuBuffer.IndirectDispatchArguments>( 1, GpuBuffer.UsageFlags.IndirectDrawArguments | GpuBuffer.UsageFlags.ByteAddress ),
 			SurfelHashGrid = Texture.CreateVolume( gridSize, gridSize, gridSize ).WithUAVBinding().WithFormat( ImageFormat.R32_UINT ).Finish(),
 

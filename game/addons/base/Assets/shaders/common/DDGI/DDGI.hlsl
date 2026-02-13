@@ -21,6 +21,9 @@ struct DDGIVolume
     int CascadeAtlasIndex;
     int ReservoirBufferIndex;
     int SDFIndex;
+    int CascadeLevels;
+    int BaseDirections;
+    int DazzleDebugMode;
 
     bool IsValid()
     {
@@ -46,9 +49,80 @@ uint DDGIVolumeCount < Attribute( "DDGI_VolumeCount" ); >;
 #define DDGI_IRRADIANCE_OCT_RESOLUTION 6
 #define DDGI_DISTANCE_OCT_RESOLUTION 14
 #define DDGI_BORDER 1
+#define DAZZLE_ATLAS_HEIGHT 1024u
+#define DAZZLE_BASE_PROBE_DIM 16u
 
 class DDGI
 {
+    static float3 Heatmap( float t )
+    {
+        float x = saturate( t );
+        return saturate(
+            float3(
+                1.5f - abs( 4.0f * x - 3.0f ),
+                1.5f - abs( 4.0f * x - 2.0f ),
+                1.5f - abs( 4.0f * x - 1.0f )
+            )
+        );
+    }
+
+    static float3 FibonacciDirection( uint dirIdx, uint totalDirs )
+    {
+        const float goldenRatio = 1.61803398875f;
+        const float PI = 3.14159265359f;
+        float i = (float)dirIdx + 0.5f;
+        float phi = 2.0f * PI * goldenRatio * i;
+        float cosTheta = 1.0f - 2.0f * ( i / max( (float)totalDirs, 1.0f ) );
+        float sinTheta = sqrt( saturate( 1.0f - cosTheta * cosTheta ) );
+        return float3( cos( phi ) * sinTheta, sin( phi ) * sinTheta, cosTheta );
+    }
+
+    static uint RequestedDirCount( uint baseDirections, uint level )
+    {
+        uint shift = min( level * 2u, 12u );
+        return max( 1u, baseDirections << shift );
+    }
+
+    static bool GetPackedLevelInfo( uint level, uint totalLevels, uint baseDirections, out uint probeDim, out uint numDirs, out uint2 atlasOffset )
+    {
+        probeDim = 1u;
+        numDirs = 0u;
+        atlasOffset = uint2( 0u, 0u );
+
+        uint clampedLevels = clamp( totalLevels, 1u, 8u );
+        uint offsetY = 0u;
+
+        [loop]
+        for ( uint l = 0u; l < clampedLevels; ++l )
+        {
+            uint dim = max( 1u, DAZZLE_BASE_PROBE_DIM >> l );
+            uint requestedDirs = RequestedDirCount( baseDirections, l );
+            uint remainingRows = ( offsetY < DAZZLE_ATLAS_HEIGHT ) ? ( DAZZLE_ATLAS_HEIGHT - offsetY ) : 0u;
+            uint maxDirsFit = remainingRows / dim;
+            uint dirs = min( requestedDirs, maxDirsFit );
+
+            if ( l == level )
+            {
+                probeDim = dim;
+                numDirs = dirs;
+                atlasOffset = uint2( 0u, offsetY );
+                return dirs > 0u;
+            }
+
+            offsetY += dirs * dim;
+        }
+
+        return false;
+    }
+
+    static uint2 PackedAtlasCoord( uint2 levelOffset, uint probeDim, uint3 probeCoord, uint dir )
+    {
+        return uint2(
+            levelOffset.x + probeCoord.x + probeCoord.z * probeDim,
+            levelOffset.y + probeCoord.y + dir * probeDim
+        );
+    }
+
     // Tile size = octahedral resolution + 2 border texels (1 on each side)
     static uint TileSize(uint resolution)
     {
@@ -230,19 +304,59 @@ class DDGI
     {
         if ( volume.Mode == 1 ) // Dazzle
         {
+             if ( volume.CascadeAtlasIndex <= 0 )
+                return 0.0f.xxx;
+
              Texture2D cascadeAtlas = Bindless::GetTexture2D( volume.CascadeAtlasIndex );
              float3 positionPs = volume.ToProbeSpace( positionWs );
-             int3 probeIdx = clamp( int3( (positionPs - volume.BBoxMin) * volume.ReciprocalSpacing ), 0, 15 );
 
-             // Sample Level 0 directions and weight by normal
-             float3 accumulatedIrradiance = 0;
-             for(uint d=0; d<16; d++) {
-                 uint2 atlasPos = uint2( probeIdx.x + probeIdx.z * 16, probeIdx.y + d * 16 );
+             uint probeDim = 0u;
+             uint numDirs = 0u;
+             uint2 levelOffset = uint2( 0u, 0u );
+             uint totalLevels = max( (uint)volume.CascadeLevels, 1u );
+             uint baseDirections = max( (uint)volume.BaseDirections, 1u );
+
+             if ( !GetPackedLevelInfo( 0u, totalLevels, baseDirections, probeDim, numDirs, levelOffset ) )
+                return 0.0f.xxx;
+
+             int maxProbeIndex = max( (int)probeDim - 1, 0 );
+             int3 probeIdx = clamp( int3( (positionPs - volume.BBoxMin) * volume.ReciprocalSpacing ), 0, maxProbeIndex );
+             float3 normal = normalize( normalWs );
+
+             // Sample Level 0 directions with cosine weighting so indirect light responds to surface normal.
+             float3 accumulatedIrradiance = 0.0f;
+             float accumulatedWeight = 0.0f;
+             for ( uint d = 0u; d < numDirs; ++d )
+             {
+                 uint2 atlasPos = PackedAtlasCoord( levelOffset, probeDim, (uint3)probeIdx, d );
                  float3 radiance = cascadeAtlas.Load( int3(atlasPos, 0) ).rgb;
-                 // In a real implementation, we'd use the actual direction
-                 accumulatedIrradiance += radiance * 0.1f;
+                 float3 dir = FibonacciDirection( d, numDirs );
+                 float w = saturate( dot( normal, dir ) );
+                 accumulatedIrradiance += radiance * w;
+                 accumulatedWeight += w;
              }
-             return accumulatedIrradiance * 3.14f;
+
+             float3 irradiance = 0.0f;
+             if ( accumulatedWeight > 1e-5f )
+             {
+                irradiance = 3.14159265f * ( accumulatedIrradiance / accumulatedWeight );
+             }
+
+             // Dazzle debug views:
+             // 0 = Off, 1 = IrradianceHeatmap, 2 = ProbeIndex
+             if ( volume.DazzleDebugMode == 1 )
+             {
+                float luminance = dot( irradiance, float3( 0.2126f, 0.7152f, 0.0722f ) );
+                return Heatmap( luminance * 0.25f ) * 2.0f;
+             }
+
+             if ( volume.DazzleDebugMode == 2 )
+             {
+                float3 probeColor = (float3( probeIdx ) + 0.5f) / max( (float)probeDim, 1.0f );
+                return max( probeColor * 2.0f, float3( 0.2f, 0.2f, 0.2f ) );
+             }
+
+             return irradiance;
         }
 
         Texture3D irradianceTex = Bindless::GetTexture3D( volume.IrradianceTextureIndex );

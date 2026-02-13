@@ -52,10 +52,14 @@ PS
 
 	void MainPs( PixelInput i )
 	{
-		float3 pos = ( i.vPositionWithOffsetWs + g_vHighPrecisionLightingOffsetWs.xyz - VolumeMin ) / ( VolumeMax - VolumeMin );
+		float3 volumeSize = VolumeMax - VolumeMin;
+		if ( any( volumeSize <= 1e-6f.xxx ) ) return;
+
+		float3 pos = ( i.vPositionWithOffsetWs + g_vHighPrecisionLightingOffsetWs.xyz - VolumeMin ) / volumeSize;
 		if ( any( pos < 0 ) || any( pos > 1 ) ) return;
 
-		int3 voxel = int3( pos * GridSize );
+		int3 maxVoxel = max( GridSize - 1, int3( 0, 0, 0 ) );
+		int3 voxel = clamp( int3( pos * GridSize ), int3( 0, 0, 0 ), maxVoxel );
 		VoxelGrid[voxel] = 1.0f;
 	}
 }

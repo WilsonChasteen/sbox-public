@@ -705,12 +705,20 @@ void CalculateIndirectLighting( inout LightingTerms_t lightingTerms, const Final
 		if ( ddgiVolume.IsValid() )
 		{
 			float3 ddgiIrradiance = DDGI::Evaluate( ddgiVolume, vPositionWs, vNormalWs, vPositionToCameraDirWs.xyz );
-			lightingTerms.vIndirectDiffuse.rgb = ddgiIrradiance;
+			float ddgiLuminance = RelativeLuminance( ddgiIrradiance );
+			bool bIsDazzleDebugView = ( ddgiVolume.Mode == 1 && ddgiVolume.DazzleDebugMode > 0 );
 
-			bHasBakedLighting = true;
-			bHasCubeBrightnessNormalization = true;
+			// Prevent invalid/empty GI from wiping existing light probe/lightmap ambient.
+			// Always allow explicit Dazzle debug views through.
+			if ( ddgiLuminance > 1e-4 || bIsDazzleDebugView )
+			{
+				lightingTerms.vIndirectDiffuse.rgb = ddgiIrradiance;
 
-			flTargetLuminanceOfCubemap = RelativeLuminance( ddgiIrradiance );
+				bHasBakedLighting = true;
+				bHasCubeBrightnessNormalization = true;
+
+				flTargetLuminanceOfCubemap = ddgiLuminance;
+			}
 		}
 	}
 
