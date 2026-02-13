@@ -101,6 +101,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 
 	private Dictionary<Guid, DazzleVolumeResources> _volumeResources = new();
 	private Dictionary<Guid, float> _nextTraceLogTime = new();
+	private Dictionary<Guid, int> _lastUpdateFrame = new();
 
 	public DazzleGISystem( Scene scene ) : base( scene )
 	{
@@ -126,7 +127,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 
 	private void UpdateDazzle()
 	{
-		if ( Application.IsHeadless || Screen.Width < 1 || Screen.Height < 1 )
+		if ( Application.IsHeadless )
 			return;
 
 		var volumes = Scene.GetAll<IndirectLightVolume>()
@@ -146,8 +147,10 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 
 		foreach ( var volume in volumes )
 		{
-			if ( UpdateVolume( volume ) )
+			if ( !_volumeResources.TryGetValue( volume.Id, out var resources ) )
 			{
+				resources = CreateResources( volume );
+				_volumeResources[volume.Id] = resources;
 				volumeBindingsChanged = true;
 			}
 		}
@@ -158,29 +161,37 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		}
 	}
 
-	private bool UpdateVolume( IndirectLightVolume volume )
+	/// <summary>
+	/// Dispatches the Dazzle GI pipeline for a specific volume.
+	/// Usually called from a render hook to ensure access to the current frame's G-buffer.
+	/// </summary>
+	public void Dispatch( IndirectLightVolume volume, SceneCamera camera )
 	{
-		var createdResources = false;
-
 		if ( !_volumeResources.TryGetValue( volume.Id, out var resources ) )
+			return;
+
+		var frame = Time.FrameCount;
+		var needsWorldUpdate = !_lastUpdateFrame.TryGetValue( volume.Id, out var lastFrame ) || lastFrame != frame;
+		_lastUpdateFrame[volume.Id] = frame;
+
+		if ( needsWorldUpdate )
 		{
-			resources = CreateResources( volume );
-			_volumeResources[volume.Id] = resources;
-			createdResources = true;
+			resources.DebugCounters.SetData( DebugCounterZeroData.AsSpan() );
 		}
 
-		resources.DebugCounters.SetData( DebugCounterZeroData.AsSpan() );
+		UpdateSurfels( volume, resources, camera );
 
-		UpdateSurfels( volume, resources );
-		UpdateSDF( volume, resources );
-		UpdateCascades( volume, resources );
-		UpdateReservoirs( volume, resources );
-		TracePipelineIfEnabled( volume, resources );
-
-		return createdResources;
+		if ( needsWorldUpdate )
+		{
+			UpdateSDF( volume, resources );
+			UpdateCascades( volume, resources );
+			UpdateReservoirs( volume, resources );
+			TracePipelineIfEnabled( volume, resources );
+		}
 	}
 
 	private static ComputeShader ClearShader = new( "common/Dazzle/dazzle_clear_cs" );
+	private static ComputeShader VoxelizeComputeShader = new( "common/Dazzle/dazzle_voxelize_cs" );
 
 	private void UpdateSDF( IndirectLightVolume volume, DazzleVolumeResources resources )
 	{
@@ -192,12 +203,19 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		clearAttrs.Set( "TargetTex", resources.VoxelGrid );
 		clearAttrs.Set( "GridSize", gridVec );
 		ClearShader.DispatchWithAttributes( clearAttrs, gridSize, gridSize, gridSize );
-		RenderAttributes.Pool.Return( clearAttrs );
 
 		var bounds = volume.Bounds.Transform( volume.WorldTransform );
-		// Camera-based voxelization path is temporarily disabled for stability on Vulkan.
 
-		// 2. JFA Seed
+		// 2. Compute-based voxelization
+		clearAttrs.Set( "VoxelGrid", resources.VoxelGrid );
+		clearAttrs.Set( "VolumeMin", bounds.Mins );
+		clearAttrs.Set( "VolumeMax", bounds.Maxs );
+		clearAttrs.Set( "GridSize", gridVec );
+		clearAttrs.Set( "DazzleDebugCounters", resources.DebugCounters );
+		VoxelizeComputeShader.DispatchWithAttributes( clearAttrs, gridSize, gridSize, gridSize );
+		RenderAttributes.Pool.Return( clearAttrs );
+
+		// 3. JFA Seed
 		var jfaAttrs = RenderAttributes.Pool.Get();
 		jfaAttrs.Set( "VoxelGrid", resources.VoxelGrid );
 		jfaAttrs.Set( "SurfelHashGrid", resources.SurfelHashGrid );
@@ -231,7 +249,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		RenderAttributes.Pool.Return( jfaAttrs );
 	}
 
-	private void UpdateSurfels( IndirectLightVolume volume, DazzleVolumeResources resources )
+	private void UpdateSurfels( IndirectLightVolume volume, DazzleVolumeResources resources, SceneCamera camera )
 	{
 		var gridSize = resources.SurfelHashGrid.Width;
 		var gridVec = new Vector3Int( gridSize );
@@ -249,6 +267,10 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		var bounds = volume.Bounds.Transform( volume.WorldTransform );
 
 		var attrs = RenderAttributes.Pool.Get();
+
+		// Merge existing render attributes (contains G-buffer textures like "Color" and "DepthChainDownsample")
+		Graphics.Attributes.MergeTo( attrs );
+
 		attrs.Set( "SurfelBuffer", resources.SurfelBuffer );
 		attrs.Set( "SurfelCountBuffer", resources.SurfelCountBuffer );
 		attrs.Set( "SurfelHashGrid", resources.SurfelHashGrid );
@@ -258,11 +280,14 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		attrs.Set( "VolumeMin", bounds.Mins );
 		attrs.Set( "VolumeMax", bounds.Maxs );
 		attrs.Set( "HashGridSize", gridVec );
-		attrs.Set( "ScreenSize", new Vector2Int( (int)Screen.Width, (int)Screen.Height ) );
+
+		var width = (int)camera.Size.x;
+		var height = (int)camera.Size.y;
+		attrs.Set( "ScreenSize", new Vector2Int( width, height ) );
 
 		// 1. Manage (Spawn)
-		var dispatchX = ((int)Screen.Width + 7) / 8;
-		var dispatchY = ((int)Screen.Height + 7) / 8;
+		var dispatchX = (width + 7) / 8;
+		var dispatchY = (height + 7) / 8;
 		SurfelManageShader.DispatchWithAttributes( attrs, dispatchX, dispatchY, 1 );
 
 		// 2. Fixup dispatch dimensions from the current surfel count
@@ -296,6 +321,7 @@ sealed class DazzleGISystem : GameObjectSystem<DazzleGISystem>
 		attrs.Set( "MaxSurfels", (uint)resources.SurfelBuffer.ElementCount );
 		attrs.Set( "TotalLevels", totalLevels );
 		attrs.Set( "BaseDirections", volume.BaseDirections );
+		attrs.Set( "UseRT", volume.UseHardwareRT );
 
 		// 1. Trace all levels (atlas writes are level-packed in shader).
 		for ( int l = 0; l < totalLevels; l++ )
