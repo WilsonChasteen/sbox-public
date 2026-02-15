@@ -37,6 +37,33 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		Relocate
 	}
 
+	public enum GIMode
+	{
+		/// <summary>
+		/// Standard baked DDGI using a probe grid.
+		/// </summary>
+		[Icon( "grid_on" )]
+		BakedDDGI,
+
+		/// <summary>
+		/// Real-time GI using Radiance Cascades and Persistent Reservoirs.
+		/// </summary>
+		[Icon( "auto_awesome" )]
+		Dazzle
+	}
+
+	public enum DazzleDebugMode
+	{
+		[Icon( "visibility_off" )]
+		Off,
+
+		[Icon( "waterfall_chart" )]
+		IrradianceHeatmap,
+
+		[Icon( "grid_4x4" )]
+		ProbeIndex
+	}
+
 	/// <summary>
 	/// Per-probe data including position offset and active state.
 	/// </summary>
@@ -62,9 +89,16 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	public BBox Bounds { get; set; } = BBox.FromPositionAndSize( Vector3.Zero, new Vector3( 512.0f ) );
 
 	/// <summary>
+	/// Which Global Illumination technique to use for this volume.
+	/// </summary>
+	[Property, MakeDirty]
+	public GIMode Mode { get; set; } = GIMode.BakedDDGI;
+
+	/// <summary>
 	/// Number of probes per 1024 world units. Higher values increase probe resolution.
 	/// </summary>
 	[Property, Range( 1, 15 ), MakeDirty]
+	[ShowIf( nameof( Mode ), GIMode.BakedDDGI )]
 	public int ProbeDensity { get; set; } = 8;
 
 	/// <summary>
@@ -73,6 +107,38 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	[Group( "Advanced Settings" )]
 	[Property, Range( -0.0f, 50.0f ), MakeDirty]
 	public float NormalBias { get; set; } = 5.0f;
+
+	[Group( "Dazzle Settings" )]
+	[Property, Range( 2, 8 ), ShowIf( nameof( Mode ), GIMode.Dazzle )]
+	public int CascadeLevels { get; set; } = 4;
+
+	[Group( "Dazzle Settings" )]
+	[Property, Range( 4, 32 ), ShowIf( nameof( Mode ), GIMode.Dazzle )]
+	public int BaseDirections { get; set; } = 16;
+
+	[Group( "Dazzle Settings" )]
+	[Property, Range( 0.1f, 10.0f ), ShowIf( nameof( Mode ), GIMode.Dazzle )]
+	public float ReservoirCellSize { get; set; } = 1.0f;
+
+	[Group( "Dazzle Settings" )]
+	[Property, Range( 0.1f, 4.0f ), ShowIf( nameof( Mode ), GIMode.Dazzle )]
+	public float SurfelDensity { get; set; } = 1.0f;
+
+	[Group( "Dazzle Settings" )]
+	[Property, ShowIf( nameof( Mode ), GIMode.Dazzle )]
+	public bool UseHardwareRT { get; set; } = true;
+
+	[Group( "Dazzle Settings" )]
+	[Property, ShowIf( nameof( Mode ), GIMode.Dazzle ), MakeDirty]
+	public DazzleDebugMode DebugView { get; set; } = DazzleDebugMode.Off;
+
+	[Group( "Dazzle Settings" )]
+	[Property, ShowIf( nameof( Mode ), GIMode.Dazzle )]
+	public bool EnablePipelineTrace { get; set; } = false;
+
+	[Group( "Dazzle Settings" )]
+	[Property, Range( 0.1f, 5.0f ), ShowIf( nameof( Mode ), GIMode.Dazzle )]
+	public float PipelineTraceInterval { get; set; } = 1.0f;
 
 	/// <summary>
 	/// Controls how much less energy to conserve during probe integration.
@@ -118,8 +184,12 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	{
 		base.OnEnabled();
 		Transform.OnTransformChanged += OnDirty;
+		ClearBakedTexturesIfDazzle();
 
-		LoadProbesFromRelocationTexture();
+		if ( Mode != GIMode.Dazzle )
+		{
+			LoadProbesFromRelocationTexture();
+		}
 		OnDirty();
 	}
 
@@ -138,6 +208,7 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	protected override void OnDirty()
 	{
 		base.OnDirty();
+		ClearBakedTexturesIfDazzle();
 		Scene.Get<DDGIVolumeSystem>()?.MarkDirty();
 	}
 
@@ -151,6 +222,14 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	[Button( "Bake", "lightbulb" )]
 	public async Task BakeProbes( CancellationToken ct = default )
 	{
+		if ( Mode == GIMode.Dazzle )
+		{
+			ClearBakedTexturesIfDazzle();
+			Scene.Get<DDGIVolumeSystem>()?.MarkDirty();
+			Log.Info( "IndirectLightVolume: Bake is not required for Dazzle mode (real-time GI)." );
+			return;
+		}
+
 		if ( Scene?.SceneWorld is null )
 			return;
 
@@ -189,6 +268,20 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		}
 
 		Scene.Get<DDGIVolumeSystem>()?.MarkDirty();
+	}
+
+	private void ClearBakedTexturesIfDazzle()
+	{
+		if ( Mode != GIMode.Dazzle )
+			return;
+
+		if ( IrradianceTexture is null && DistanceTexture is null && RelocationTexture is null )
+			return;
+
+		IrradianceTexture = default;
+		DistanceTexture = default;
+		RelocationTexture = default;
+		Probes = null;
 	}
 
 	/// <summary>
@@ -271,7 +364,9 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	{
 		data = default;
 
-		if ( !IrradianceTexture.IsValid() || !DistanceTexture.IsValid() || !RelocationTexture.IsValid() )
+		var isDazzle = Mode == GIMode.Dazzle;
+
+		if ( !isDazzle && ( !IrradianceTexture.IsValid() || !DistanceTexture.IsValid() || !RelocationTexture.IsValid() ) )
 			return false;
 
 		var probeCounts = ProbeCounts;
@@ -296,10 +391,29 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 				probeCounts.z > 1 ? 1.0f / (probeCounts.z - 1) : 0.0f
 			),
 			ProbeCounts = probeCounts,
-			RelocationTextureIndex = RelocationTexture.Index,
-			IrradianceTextureIndex = IrradianceTexture.Index,
-			DistanceTextureIndex = DistanceTexture.Index,
+			RelocationTextureIndex = isDazzle ? 0 : (RelocationTexture.IsValid() ? RelocationTexture.Index : 0),
+			IrradianceTextureIndex = isDazzle ? 0 : (IrradianceTexture.IsValid() ? IrradianceTexture.Index : 0),
+			DistanceTextureIndex = isDazzle ? 0 : (DistanceTexture.IsValid() ? DistanceTexture.Index : 0),
+			Mode = (int)Mode,
+			CascadeLevels = isDazzle ? this.CascadeLevels : 1,
+			BaseDirections = isDazzle ? this.BaseDirections : 1,
+			DazzleDebugMode = (int)DebugView,
 		};
+
+		if ( Mode == GIMode.Dazzle )
+		{
+			if ( DazzleGISystem.Current is null )
+				return false;
+
+			if ( !DazzleGISystem.Current.GetResources( Id, out var res ) )
+				return false;
+
+			if ( !res.Cascades.IsValid() )
+				return false;
+
+			data.CascadeAtlasIndex = res.Cascades.Index;
+			data.SDFIndex = res.SDF.IsValid() ? res.SDF.Index : 0;
+		}
 
 		return true;
 	}
@@ -319,6 +433,13 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		public int DistanceTextureIndex;
 		public Vector3Int ProbeCounts;
 		public int RelocationTextureIndex;
+		public int Mode;
+		public int CascadeAtlasIndex;
+		public int ReservoirBufferIndex;
+		public int SDFIndex;
+		public int CascadeLevels;
+		public int BaseDirections;
+		public int DazzleDebugMode;
 	}
 
 	//

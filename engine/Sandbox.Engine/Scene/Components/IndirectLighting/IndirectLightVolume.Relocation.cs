@@ -407,6 +407,10 @@ public sealed partial class IndirectLightVolume
 		if ( !Application.IsEditor )
 			return;
 
+		// Dazzle mode does not consume relocation textures.
+		if ( Mode == GIMode.Dazzle )
+			return;
+
 		if ( Probes is not null )
 			return;
 

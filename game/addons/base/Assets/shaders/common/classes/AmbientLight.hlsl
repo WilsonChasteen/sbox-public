@@ -10,7 +10,8 @@ enum AmbientLightKind
     EnvMapProbe,            // Image-based Lighting
     LightMapProbeVolume,    // Probe-based Lighting
     LightMap2D,             // 2D Lightmaps for static geometry
-    DDGI                    // Dynamic Diffuse Global Illumination
+    DDGI,                   // Dynamic Diffuse Global Illumination
+    Dazzle                  // Dazzle Real-time GI
 };
 
 /// <summary>
@@ -18,10 +19,12 @@ enum AmbientLightKind
 /// </summary>
 class AmbientLight
 {
-    static AmbientLightKind GetKind()
+    static AmbientLightKind GetKind(float3 WorldPosition)
     {
-        if ( DDGI::IsEnabled() )
+        DDGIVolume volume = DDGI::GetVolume( WorldPosition );
+        if ( volume.IsValid() )
         {
+            if ( volume.Mode == 1 ) return AmbientLightKind::Dazzle;
             return AmbientLightKind::DDGI;
         }
         else if ( ProbeLight::UsesProbes() )
@@ -40,16 +43,16 @@ class AmbientLight
 
     static float3 From( float3 WorldPosition, float3 WorldNormal, float2 LightMapUV = 0.0f )
     {
-        switch( GetKind() )
+        switch( GetKind(WorldPosition) )
         {
+            case AmbientLightKind::Dazzle:
+                return FromDazzle( WorldPosition, WorldNormal );
             case AmbientLightKind::DDGI:
                 return FromDDGI( WorldPosition, WorldNormal );
             case AmbientLightKind::EnvMapProbe:
                 return FromEnvMapProbe( WorldPosition, WorldNormal );
-                break;
             case AmbientLightKind::LightMapProbeVolume:
                 return FromLightMapProbeVolume( WorldPosition, WorldNormal );
-                break;
             case AmbientLightKind::LightMap2D:
                 return 0.0f;
         }
@@ -57,6 +60,7 @@ class AmbientLight
     }
 
     static float3 FromDDGI(float3 WorldPosition, float3 WorldNormal);
+    static float3 FromDazzle(float3 WorldPosition, float3 WorldNormal);
     static float3 FromEnvMapProbe(float3 WorldPosition, float3 WorldNormal);
     static float3 FromLightMapProbeVolume(float3 WorldPosition, float3 WorldNormal);
     static float3 FromLightMap(float3 WorldPosition, float2 LightMapUV);
@@ -72,6 +76,16 @@ float3 AmbientLight::FromDDGI( float3 WorldPosition, float3 WorldNormal )
         return ddgiIrradiance;
     }
 
+    return 0.0f;
+}
+
+float3 AmbientLight::FromDazzle( float3 WorldPosition, float3 WorldNormal )
+{
+    DDGIVolume volume = DDGI::GetVolume( WorldPosition );
+    if ( volume.IsValid() )
+    {
+        return DDGI::Evaluate( volume, WorldPosition, WorldNormal );
+    }
     return 0.0f;
 }
 
@@ -120,21 +134,6 @@ float3 AmbientLight::FromEnvMapProbe(float3 WorldPosition, float3 WorldNormal)
         const float3 localNormal = mul(float4(WorldNormal, 0.0f), EnvMapWorldToLocal(index)).xyz;
 
         float3 envMapColor = SampleEnvironmentMapLevel(WorldNormal, 1.0f, index);
-
-        // Adjust for subsurface scattering if enabled
-        /*#if (S_SUBSURFACE_SCATTERING == SUBSURFACE_SCATTERING_PREINTEGRATED)
-        {
-            float flSSSMask = 0;
-
-            float3 normalR = normalize(lerp(WorldNormal, vNormalWs, g_vAmbientNormalSoftness.r * flSSSMask));
-            float3 normalG = normalize(lerp(WorldNormal, vNormalWs, g_vAmbientNormalSoftness.g * flSSSMask));
-            float3 normalB = normalize(lerp(WorldNormal, vNormalWs, g_vAmbientNormalSoftness.b * flSSSMask));
-            
-            envMapColor.r = SampleEnvironmentMapLevel(normalR, 1.0f, index).r;
-            envMapColor.g = SampleEnvironmentMapLevel(normalG, 1.0f, index).g;
-            envMapColor.b = SampleEnvironmentMapLevel(normalB, 1.0f, index).b;
-        }
-        #endif*/
 
         // Blend the ambient light color
         ambientLightColor = lerp(ambientLightColor, envMapColor, 1.0 - accumulatedDistance);
