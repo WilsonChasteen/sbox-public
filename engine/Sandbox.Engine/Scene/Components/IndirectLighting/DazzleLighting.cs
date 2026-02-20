@@ -73,6 +73,34 @@ public sealed class DazzleLighting : Component, Component.ExecuteInEditor, Compo
 	[Group( "Radiance Cascades" )]
 	public float CascadeBounceStrength { get; set; } = 0.75f;
 
+	[Property, Range( 0.0f, 1.0f ), MakeDirty]
+	[Group( "Physical Accumulation" )]
+	public float MultiBounceInfluence { get; set; } = 0.65f;
+
+	[Property, Range( 0.0f, 2.0f ), MakeDirty]
+	[Group( "Physical Accumulation" )]
+	public float EmissiveBlend { get; set; } = 1.0f;
+
+	[Property, Range( 0.0f, 2.0f ), MakeDirty]
+	[Group( "Physical Accumulation" )]
+	public float VolumetricBlend { get; set; } = 0.85f;
+
+	[Property, Range( 0.0f, 2.0f ), MakeDirty]
+	[Group( "Physical Accumulation" )]
+	public float ScreenSpaceBlend { get; set; } = 0.8f;
+
+	[Property, Range( 0.1f, 4.0f ), MakeDirty]
+	[Group( "Physical Accumulation" )]
+	public float ExposureCompensation { get; set; } = 1.0f;
+
+	[Property, Range( 1.0f, 24.0f ), MakeDirty]
+	[Group( "Physical Accumulation" )]
+	public float WhitePoint { get; set; } = 8.0f;
+
+	[Property, Range( 0.0f, 1.0f ), MakeDirty]
+	[Group( "Physical Accumulation" )]
+	public float TonemapShoulder { get; set; } = 0.75f;
+
 	[Property, MakeDirty]
 	[Group( "Debug" )]
 	public bool EnableGIPipelineTrace { get; set; } = false;
@@ -162,6 +190,13 @@ public sealed class DazzleLighting : Component, Component.ExecuteInEditor, Compo
 			GIUpdateFraction = cascadeUpdateFraction,
 			GITemporalBlend = cascadeTemporalBlend,
 			GIBounceStrength = cascadeBounceStrength,
+			MultiBounceInfluence = Math.Clamp( MultiBounceInfluence, 0.0f, 1.0f ),
+			EmissiveBlend = Math.Clamp( EmissiveBlend, 0.0f, 2.0f ),
+			VolumetricBlend = Math.Clamp( VolumetricBlend, 0.0f, 2.0f ),
+			ScreenSpaceBlend = Math.Clamp( ScreenSpaceBlend, 0.0f, 2.0f ),
+			ExposureCompensation = Math.Clamp( ExposureCompensation, 0.1f, 4.0f ),
+			WhitePoint = Math.Clamp( WhitePoint, 1.0f, 24.0f ),
+			TonemapShoulder = Math.Clamp( TonemapShoulder, 0.0f, 1.0f ),
 			GIPipelineTrace = EnableGIPipelineTrace,
 			GIDebugView = (int)GIDebugView,
 			GIPipelineTraceLog = GIPipelineTraceLog
@@ -188,6 +223,13 @@ internal struct DazzleLightingRuntimeData
 	public float GIUpdateFraction;
 	public float GITemporalBlend;
 	public float GIBounceStrength;
+	public float MultiBounceInfluence;
+	public float EmissiveBlend;
+	public float VolumetricBlend;
+	public float ScreenSpaceBlend;
+	public float ExposureCompensation;
+	public float WhitePoint;
+	public float TonemapShoulder;
 	public bool GIPipelineTrace;
 	public int GIDebugView;
 	public bool GIPipelineTraceLog;

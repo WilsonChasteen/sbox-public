@@ -493,7 +493,6 @@ void ComputeDirectLighting( inout LightingTerms_t o, const FinalCombinerInput_t 
 		ComputeDirectLightingForLight( f, lightData, o.vDiffuse.rgb, o.vSpecular.rgb, o.vTransmissive.rgb );
 	}
 
-	DazzleLighting::ApplyDirect( o.vDiffuse.rgb, o.vSpecular.rgb, o.vTransmissive.rgb );
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -873,22 +872,17 @@ void CalculateIndirectLighting( inout LightingTerms_t lightingTerms, const Final
 		}
 	}
 
-	lightingTerms.vIndirectDiffuse.rgb = DazzleLighting::ComposeIndirectDiffuse(
+	DazzleLighting::ApplyUnifiedAccumulation(
+		lightingTerms.vDiffuse.rgb,
+		lightingTerms.vSpecular.rgb,
 		lightingTerms.vIndirectDiffuse.rgb,
+		lightingTerms.vIndirectSpecular.rgb,
+		lightingTerms.vTransmissive.rgb,
 		vFallbackIndirectDiffuse.rgb,
 		lightingTerms.flDynamicAmbientOcclusion,
 		vPositionSS,
 		vNormalWs,
 		flIsotropicRoughness );
-	lightingTerms.vIndirectSpecular.rgb = DazzleLighting::ComposeIndirectSpecular(
-		lightingTerms.vIndirectSpecular.rgb,
-		flIsotropicRoughness );
-	DazzleLighting::ApplyGIDebugOverride(
-		lightingTerms.vDiffuse.rgb,
-		lightingTerms.vSpecular.rgb,
-		lightingTerms.vIndirectDiffuse.rgb,
-		lightingTerms.vIndirectSpecular.rgb,
-		lightingTerms.vTransmissive.rgb );
 	
 	// Apply indirect transmissive lighting
 	lightingTerms.vTransmissive.rgb += vTransmissiveMask.rgb * lightingTerms.vIndirectDiffuse.rgb;

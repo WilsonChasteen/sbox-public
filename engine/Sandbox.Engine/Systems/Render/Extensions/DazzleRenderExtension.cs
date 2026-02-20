@@ -63,6 +63,13 @@ internal sealed class DazzleRenderExtension : RenderExtension
 		attrs.SetFloatValue( "Dazzle_GIUpdateFraction", attrs.GetFloatValue( "Dazzle_GIUpdateFraction", 1.0f ) );
 		attrs.SetFloatValue( "Dazzle_GITemporalBlend", attrs.GetFloatValue( "Dazzle_GITemporalBlend", 0.9f ) );
 		attrs.SetFloatValue( "Dazzle_GIBounceStrength", attrs.GetFloatValue( "Dazzle_GIBounceStrength", 0.75f ) );
+		attrs.SetFloatValue( "Dazzle_MultiBounceInfluence", attrs.GetFloatValue( "Dazzle_MultiBounceInfluence", 0.65f ) );
+		attrs.SetFloatValue( "Dazzle_EmissiveBlend", attrs.GetFloatValue( "Dazzle_EmissiveBlend", 1.0f ) );
+		attrs.SetFloatValue( "Dazzle_VolumetricBlend", attrs.GetFloatValue( "Dazzle_VolumetricBlend", 0.85f ) );
+		attrs.SetFloatValue( "Dazzle_ScreenSpaceBlend", attrs.GetFloatValue( "Dazzle_ScreenSpaceBlend", 0.8f ) );
+		attrs.SetFloatValue( "Dazzle_ExposureCompensation", attrs.GetFloatValue( "Dazzle_ExposureCompensation", 1.0f ) );
+		attrs.SetFloatValue( "Dazzle_WhitePoint", attrs.GetFloatValue( "Dazzle_WhitePoint", 8.0f ) );
+		attrs.SetFloatValue( "Dazzle_TonemapShoulder", attrs.GetFloatValue( "Dazzle_TonemapShoulder", 0.75f ) );
 		attrs.SetBoolValue( "Dazzle_GIPipelineTrace", attrs.GetBoolValue( "Dazzle_GIPipelineTrace", false ) );
 		attrs.SetIntValue( "Dazzle_GIDebugView", attrs.GetIntValue( "Dazzle_GIDebugView", 0 ) );
 		attrs.SetBoolValue( "Dazzle_GIPipelineTraceLog", attrs.GetBoolValue( "Dazzle_GIPipelineTraceLog", false ) );

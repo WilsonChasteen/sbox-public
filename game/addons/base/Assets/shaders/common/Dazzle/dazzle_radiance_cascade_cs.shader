@@ -42,6 +42,10 @@ COMMON
 	float Dazzle_GIUpdateFraction < Attribute( "Dazzle_GIUpdateFraction" ); Default( 1.0f ); >;
 	float Dazzle_GITemporalBlend < Attribute( "Dazzle_GITemporalBlend" ); Default( 0.9f ); >;
 	float Dazzle_GIBounceStrength < Attribute( "Dazzle_GIBounceStrength" ); Default( 0.75f ); >;
+	float Dazzle_MultiBounceInfluence < Attribute( "Dazzle_MultiBounceInfluence" ); Default( 0.65f ); >;
+	float Dazzle_ExposureCompensation < Attribute( "Dazzle_ExposureCompensation" ); Default( 1.0f ); >;
+	float Dazzle_WhitePoint < Attribute( "Dazzle_WhitePoint" ); Default( 8.0f ); >;
+	float Dazzle_TonemapShoulder < Attribute( "Dazzle_TonemapShoulder" ); Default( 0.75f ); >;
 	int DazzleFrameParity < Attribute( "DazzleFrameParity" ); Default( 0 ); >;
 	int DazzleDiagEnabled < Attribute( "DazzleDiagEnabled" ); Default( 0 ); >;
 	RWStructuredBuffer<uint> DazzleDiagBuffer < Attribute( "DazzleDiagBuffer" ); >;
@@ -99,6 +103,9 @@ COMMON
 	{
 		return max( dot( max( radiance, 0.0f ), float3( 0.2126f, 0.7152f, 0.0722f ) ), 0.0f );
 	}
+
+	float3 ExposureAwareClamp( float3 radiance );
+	float3 EnergyConserve( float3 radiance, float bias );
 
 	uint PackCell( uint2 pixelCoord )
 	{
@@ -230,7 +237,8 @@ COMMON
 		nearCascade *= (0.4f + 0.6f * depthAttenuation);
 		nearCascade *= aoAttenuation;
 		nearCascade *= energyBoost;
-		nearCascade = max( nearCascade, 0.0f );
+		nearCascade = ExposureAwareClamp( nearCascade );
+		nearCascade = EnergyConserve( nearCascade, 0.8f );
 
 		if ( DiagEnabled() )
 		{
@@ -292,10 +300,13 @@ COMMON
 
 		float3 neighborhood = (north + south + east + west) * 0.25f;
 		float bounce = max( Dazzle_GIBounceStrength, 0.0f );
+		float multiBounce = saturate( Dazzle_MultiBounceInfluence );
 
 		float3 propagated = center + neighborhood * bounce;
-		propagated /= (1.0f + bounce);
-		propagated = max( propagated, 0.0f );
+		propagated += neighborhood * bounce * multiBounce * 0.5f;
+		propagated /= (1.0f + bounce * (1.0f + multiBounce * 0.5f));
+		propagated = ExposureAwareClamp( propagated );
+		propagated = EnergyConserve( propagated, 0.9f );
 
 		if ( DiagEnabled() )
 		{
@@ -337,6 +348,26 @@ COMMON
 		return propagated;
 	}
 
+
+	float3 ExposureAwareClamp( float3 radiance )
+	{
+		float exposure = max( Dazzle_ExposureCompensation, 0.1f );
+		float whitePoint = max( Dazzle_WhitePoint, 1.0f ) * exposure;
+		float shoulder = lerp( 0.7f, 1.6f, saturate( Dazzle_TonemapShoulder ) );
+		float3 hdr = max( radiance * exposure, 0.0f );
+		float3 mapped = hdr * (1.0f + hdr / (whitePoint * whitePoint * shoulder));
+		mapped /= (1.0f + hdr);
+		float restore = 1.0f + ComputeEnergy( radiance );
+		return max( mapped * restore, 0.0f );
+	}
+
+	float3 EnergyConserve( float3 radiance, float bias )
+	{
+		float energy = ComputeEnergy( radiance );
+		float conservation = rcp( 1.0f + max( energy - bias, 0.0f ) * 0.35f );
+		return max( radiance * conservation, 0.0f );
+	}
+
 	float ComputeReactiveFactor( uint2 pixelCoord )
 	{
 		int2 fullPixel = FullResPixel( pixelCoord );
@@ -363,7 +394,9 @@ COMMON
 			temporalBlend = max( temporalBlend, 0.95f );
 		}
 
-		float3 resolved = max( lerp( current, history, temporalBlend ), 0.0f );
+		float3 resolved = lerp( current, history, temporalBlend );
+		resolved = ExposureAwareClamp( resolved );
+		resolved = EnergyConserve( resolved, 1.0f );
 
 		if ( DiagEnabled() )
 		{

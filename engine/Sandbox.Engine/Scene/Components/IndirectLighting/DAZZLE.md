@@ -28,6 +28,36 @@ The radiance cascade module is a 3-pass incremental compute update:
 
 The result is stored in a persistent per-view history texture and sampled by Dazzle shading on the next frame.
 
+## Unified Physical Accumulation Model
+
+Dazzle now uses a single accumulation model for direct, indirect, ambient, emissive, volumetric, and screen-space routed radiance.
+
+At a high level each stage computes:
+
+- `L_hdr = max(0, L_engine + L_dazzle)`
+- `L_tm = TonemapExposureAware( L_hdr, exposure, whitePoint, shoulder )`
+- `E = luminance( L_hdr )`
+- `L_out = EnergyConserve( L_tm * (1 + E) )`
+
+Where:
+
+- `TonemapExposureAware` uses a white-point constrained shoulder curve to prevent white-out while preserving HDR contrast.
+- `EnergyConserve` applies `1 / (1 + max(E - bias, 0) * k)` so boosted light remains physically plausible.
+- Multi-bounce GI is driven by `Dazzle_GIBounceStrength` and `Dazzle_MultiBounceInfluence`.
+- Temporal resolve blends current/history radiance then runs the same exposure + conservation clamp to maintain deterministic frame-to-frame energy.
+
+This keeps Dazzle compatible with the engine BRDF and shadowing path while replacing blend behavior with physically-grounded accumulation.
+
+### New runtime controls
+
+- `Dazzle_MultiBounceInfluence`
+- `Dazzle_EmissiveBlend`
+- `Dazzle_VolumetricBlend`
+- `Dazzle_ScreenSpaceBlend`
+- `Dazzle_ExposureCompensation`
+- `Dazzle_WhitePoint`
+- `Dazzle_TonemapShoulder`
+
 ## Data Flow
 
 - Per-scene config:
@@ -40,7 +70,8 @@ The result is stored in a persistent per-view history texture and sampled by Daz
 `DazzleRadianceCascadeLayer` runs at pipeline end and refreshes caches incrementally.
 
 - Shading consumption:
-`DazzleLighting.hlsl` samples `Dazzle_GITextureIndex` and injects radiance in `ComposeIndirectDiffuse`.
+`DazzleLighting.hlsl` performs unified exposure-aware blending in `ApplyUnifiedAccumulation` (which internally uses `ApplyDirect`, `ComposeAmbient`, `ComposeIndirectDiffuse`, and `ComposeIndirectSpecular`) and samples `Dazzle_GITextureIndex` for multi-bounce GI.
+This is now executed directly from `vr_lighting.fxc` so VR shading paths use the same accumulation model.
 
 ## Integration Points
 
