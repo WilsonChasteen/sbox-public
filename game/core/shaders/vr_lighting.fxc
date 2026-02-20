@@ -880,6 +880,11 @@ void CalculateIndirectLighting( inout LightingTerms_t lightingTerms, const Final
 		lightingTerms.vTransmissive.rgb,
 		vFallbackIndirectDiffuse.rgb,
 		lightingTerms.flDynamicAmbientOcclusion,
+		lightingTerms.flBakedAmbientOcclusion,
+		finalCombinerData.vBentNormalWs.xyz,
+		finalCombinerData.vNormalWs.xyz,
+		finalCombinerData.vSpecularColor,
+		flSSSCurvature,
 		vPositionSS,
 		vNormalWs,
 		flIsotropicRoughness );

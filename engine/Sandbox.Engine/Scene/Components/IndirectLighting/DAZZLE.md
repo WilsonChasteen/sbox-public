@@ -58,6 +58,21 @@ This keeps Dazzle compatible with the engine BRDF and shadowing path while repla
 - `Dazzle_WhitePoint`
 - `Dazzle_TonemapShoulder`
 
+
+### Data fusion sources in the backend
+
+The unified backend now fuses these signals per-pixel before final indirect/specular accumulation:
+
+- Screen-space AO (`flDynamicAmbientOcclusion`)
+- Baked AO (`flBakedAmbientOcclusion`)
+- Bent-normal visibility (`dot( bentNormalWs, geometricNormalWs )`)
+- Depth-derived occlusion (screen-space depth attenuation)
+- Material response terms (roughness + inferred metalness from specular F0)
+- Curvature weighting (`flSSSCurvature`) for crevice/contact preservation
+- Radiance-cascade GI history (`Dazzle_GITextureIndex`) and bounce propagation
+
+Compared to the engine default path, Dazzle computes a fused occlusion term and uses it to modulate both diffuse bounce and specular occlusion under energy-conserving HDR blending, rather than treating AO/GI/material terms as mostly separate late-stage multipliers.
+
 ## Data Flow
 
 - Per-scene config:
