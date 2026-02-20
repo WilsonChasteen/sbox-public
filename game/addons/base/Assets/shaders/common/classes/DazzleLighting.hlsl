@@ -321,7 +321,6 @@ class DazzleLighting
 		return SafeHdr( blended );
 	}
 
-	static void ApplyGIDebugOverride( inout float3 diffuse, inout float3 specular, inout float3 indirectDiffuse, inout float3 indirectSpecular, inout float3 transmissive );
 
 	static void ApplyUnifiedAccumulation(
 		inout float3 diffuse,
