@@ -492,6 +492,8 @@ void ComputeDirectLighting( inout LightingTerms_t o, const FinalCombinerInput_t 
 		const BinnedLight lightData = DynamicLightConstantByIndex( index );
 		ComputeDirectLightingForLight( f, lightData, o.vDiffuse.rgb, o.vSpecular.rgb, o.vTransmissive.rgb );
 	}
+
+	DazzleLighting::ApplyDirect( o.vDiffuse.rgb, o.vSpecular.rgb, o.vTransmissive.rgb );
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -569,6 +571,7 @@ void CalculateIndirectLighting( inout LightingTerms_t lightingTerms, const Final
 	bool bHasSpecular = false;
 	bool bHasBakedLighting = true;
 	bool bHasCubeBrightnessNormalization = true;
+	float3 vFallbackIndirectDiffuse = 0.0f;
 
 
 	if ( LightmappedLight::UsesLightmaps() )
@@ -621,6 +624,7 @@ void CalculateIndirectLighting( inout LightingTerms_t lightingTerms, const Final
 		flTargetLuminanceOfCubemap = RelativeLuminance( vIrradiance.rgb );
 
 		lightingTerms.vIndirectDiffuse += float3( vIrradiance.xyz );
+		vFallbackIndirectDiffuse = lightingTerms.vIndirectDiffuse.rgb;
 	}
 	else if ( ProbeLight::UsesProbes() )
 	{
@@ -687,12 +691,15 @@ void CalculateIndirectLighting( inout LightingTerms_t lightingTerms, const Final
 
 			CalcBakedLightingForLight( finalCombinerData, nLightIndex, flShadow, vPositionToCameraDirWs.xyz, lightingTerms.vDiffuse, lightingTerms.vSpecular, lightingTerms.vTransmissive );
 		}
+
+		vFallbackIndirectDiffuse = lightingTerms.vIndirectDiffuse.rgb;
 	}
 	else
 	{
 		bHasBakedLighting = false;
 		bHasCubeBrightnessNormalization = false;
 		lightingTerms.vIndirectDiffuse.rgb = lerp( 1.0f, AmbientLightColor.rgb, AmbientLightColor.a ) ;
+		vFallbackIndirectDiffuse = lightingTerms.vIndirectDiffuse.rgb;
 	}
 
     //
@@ -860,8 +867,28 @@ void CalculateIndirectLighting( inout LightingTerms_t lightingTerms, const Final
 			lightingTerms.vIndirectSpecular.rgb += vCubeMapTexel_Specular.rgb;
 		
 		if( !bHasBakedLighting )
+		{
 			lightingTerms.vIndirectDiffuse.rgb = lerp( vCubeMapTexel_Diffuse.rgb, lightingTerms.vIndirectDiffuse.rgb, AmbientLightColor.w );
+			vFallbackIndirectDiffuse = lightingTerms.vIndirectDiffuse.rgb;
+		}
 	}
+
+	lightingTerms.vIndirectDiffuse.rgb = DazzleLighting::ComposeIndirectDiffuse(
+		lightingTerms.vIndirectDiffuse.rgb,
+		vFallbackIndirectDiffuse.rgb,
+		lightingTerms.flDynamicAmbientOcclusion,
+		vPositionSS,
+		vNormalWs,
+		flIsotropicRoughness );
+	lightingTerms.vIndirectSpecular.rgb = DazzleLighting::ComposeIndirectSpecular(
+		lightingTerms.vIndirectSpecular.rgb,
+		flIsotropicRoughness );
+	DazzleLighting::ApplyGIDebugOverride(
+		lightingTerms.vDiffuse.rgb,
+		lightingTerms.vSpecular.rgb,
+		lightingTerms.vIndirectDiffuse.rgb,
+		lightingTerms.vIndirectSpecular.rgb,
+		lightingTerms.vTransmissive.rgb );
 	
 	// Apply indirect transmissive lighting
 	lightingTerms.vTransmissive.rgb += vTransmissiveMask.rgb * lightingTerms.vIndirectDiffuse.rgb;

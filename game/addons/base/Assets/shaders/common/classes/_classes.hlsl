@@ -12,6 +12,7 @@
 #include "common/classes/DynamicReflections.hlsl"
 #include "common/classes/ScreenSpaceAmbientOcclusion.hlsl"
 #include "common/classes/ScreenSpaceTrace.hlsl"
+#include "common/classes/DazzleLighting.hlsl"
 #include "common/classes/AmbientLight.hlsl"
 #include "common/classes/EnvMap.hlsl"
 #include "common/classes/ToolsVis.hlsl"

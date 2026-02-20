@@ -4,9 +4,11 @@
 #include "light_probe_volume.fxc"
 #include "vr_environment_map.fxc"
 #include "common/DDGI/DDGI.hlsl"
+#include "common/classes/DazzleLighting.hlsl"
 
 enum AmbientLightKind
 {
+    Dazzle,
     EnvMapProbe,            // Image-based Lighting
     LightMapProbeVolume,    // Probe-based Lighting
     LightMap2D,             // 2D Lightmaps for static geometry
@@ -20,7 +22,11 @@ class AmbientLight
 {
     static AmbientLightKind GetKind()
     {
-        if ( DDGI::IsEnabled() )
+        if ( DazzleLighting::IsEnabled() )
+        {
+            return AmbientLightKind::Dazzle;
+        }
+        else if ( DDGI::IsEnabled() )
         {
             return AmbientLightKind::DDGI;
         }
@@ -42,6 +48,8 @@ class AmbientLight
     {
         switch( GetKind() )
         {
+            case AmbientLightKind::Dazzle:
+                return FromDazzle( WorldPosition, WorldNormal );
             case AmbientLightKind::DDGI:
                 return FromDDGI( WorldPosition, WorldNormal );
             case AmbientLightKind::EnvMapProbe:
@@ -56,11 +64,34 @@ class AmbientLight
         return 0.0f;
     }
 
+    static float3 FromDazzle(float3 WorldPosition, float3 WorldNormal);
     static float3 FromDDGI(float3 WorldPosition, float3 WorldNormal);
     static float3 FromEnvMapProbe(float3 WorldPosition, float3 WorldNormal);
     static float3 FromLightMapProbeVolume(float3 WorldPosition, float3 WorldNormal);
     static float3 FromLightMap(float3 WorldPosition, float2 LightMapUV);
 };
+
+float3 AmbientLight::FromDazzle( float3 WorldPosition, float3 WorldNormal )
+{
+    float3 fallbackAmbient = 0.0f;
+
+    if ( ProbeLight::UsesProbes() )
+    {
+        fallbackAmbient = FromLightMapProbeVolume( WorldPosition, WorldNormal );
+    }
+    else if ( !LightmappedLight::UsesLightmaps() )
+    {
+        fallbackAmbient = FromEnvMapProbe( WorldPosition, WorldNormal );
+    }
+
+    if ( DDGI::IsEnabled() )
+    {
+        float3 ddgiAmbient = FromDDGI( WorldPosition, WorldNormal );
+        return DazzleLighting::ComposeAmbient( ddgiAmbient, fallbackAmbient );
+    }
+
+    return fallbackAmbient;
+}
 
 float3 AmbientLight::FromDDGI( float3 WorldPosition, float3 WorldNormal )
 {

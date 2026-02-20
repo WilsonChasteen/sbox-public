@@ -15,6 +15,7 @@ internal static class RenderExtensions
 	{
 		// Auto-register the hardware ray tracing accelerator if we're on Vulkan
 		Register( new VulkanRayTracingAccelerator() );
+		Register( new DazzleRenderExtension() );
 	}
 
 	/// <summary>

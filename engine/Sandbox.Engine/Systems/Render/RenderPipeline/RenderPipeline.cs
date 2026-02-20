@@ -103,6 +103,9 @@ internal partial class RenderPipeline
 			RefractionStencilLayer.AddToView( view, quarterViewport );
 		}
 
+		// Extensions can append optional layers or mutate view attributes.
+		RenderExtensions.AddLayersToView( this, view, viewport );
+
 		// Opaque pass
 		// Transparent pass
 		// Etc.
@@ -111,20 +114,19 @@ internal partial class RenderPipeline
 	internal void PipelineEnd( ISceneView view, RenderViewport viewport, SceneViewRenderTargetHandle rtColor, SceneViewRenderTargetHandle rtDepth, RenderMultisampleType nMSAA, CRenderAttributes pipelineAttrs, RenderViewport screenSize )
 	{
 		var cameraId = view.m_ManagedCameraId;
-		if ( cameraId == 0 )
-			return;
-
-		var viewCamera = IManagedCamera.FindById( cameraId );
-		if ( viewCamera is not SceneCamera sceneCamera )
-			return;
-
-		// Only record from the camera explicitly marked for recording
-		if ( sceneCamera.IsRecordingCamera )
+		if ( cameraId != 0 )
 		{
-			RecordMovieFrameLayer.ColorAttachment = rtColor;
-			RecordMovieFrameLayer.AddToView( view, viewport );
-			PostRecordMovieFrameLayer.ColorAttachment = rtColor;
-			PostRecordMovieFrameLayer.AddToView( view, viewport );
+			var viewCamera = IManagedCamera.FindById( cameraId );
+			if ( viewCamera is SceneCamera sceneCamera && sceneCamera.IsRecordingCamera )
+			{
+				// Only record from the camera explicitly marked for recording.
+				RecordMovieFrameLayer.ColorAttachment = rtColor;
+				RecordMovieFrameLayer.AddToView( view, viewport );
+				PostRecordMovieFrameLayer.ColorAttachment = rtColor;
+				PostRecordMovieFrameLayer.AddToView( view, viewport );
+			}
 		}
+
+		RenderExtensions.PipelineEnd( this, view, viewport );
 	}
 }
