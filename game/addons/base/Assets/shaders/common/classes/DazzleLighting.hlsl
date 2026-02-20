@@ -133,6 +133,20 @@ class DazzleLighting
 		return saturate( (specLuma - dielectricF0) / max( 1.0f - dielectricF0, 1e-4f ) );
 	}
 
+	static float SoftOcclusionFuse( float a, float b )
+	{
+		a = saturate( a );
+		b = saturate( b );
+		float geometric = sqrt( max( a * b, 0.0f ) );
+		float average = 0.5f * (a + b);
+		return saturate( lerp( average, geometric, 0.65f ) );
+	}
+
+	static float SmoothOcclusionResponse( float value )
+	{
+		return smoothstep( 0.05f, 0.98f, saturate( value ) );
+	}
+
 	static float ComputeFusionOcclusion(
 		float dynamicAO,
 		float bakedAO,
@@ -142,11 +156,14 @@ class DazzleLighting
 		float metalness,
 		float curvature )
 	{
-		float ao = saturate( min( dynamicAO, bakedAO ) );
-		float microOcclusion = saturate( 1.0f - (1.0f - ao) * (0.65f + 0.35f * bentNormalVisibility) );
-		float materialOcclusion = lerp( microOcclusion, microOcclusion * (1.0f - 0.18f * metalness), saturate( roughness ) );
-		float curvatureOcclusion = saturate( 1.0f - abs( curvature ) * 0.35f );
-		return saturate( materialOcclusion * depthOcclusion * curvatureOcclusion );
+		float ao = SoftOcclusionFuse( dynamicAO, bakedAO );
+		float bentTerm = lerp( 0.82f, 1.0f, saturate( bentNormalVisibility ) );
+		float depthTerm = lerp( 0.75f, 1.0f, SmoothOcclusionResponse( depthOcclusion ) );
+		float microOcclusion = ao * bentTerm * depthTerm;
+		float materialOcclusion = lerp( microOcclusion, microOcclusion * (1.0f - 0.14f * metalness), saturate( roughness ) );
+		float curvatureOcclusion = lerp( 1.0f, saturate( 1.0f - abs( curvature ) * 0.24f ), 0.6f );
+		float fused = materialOcclusion * curvatureOcclusion;
+		return saturate( lerp( fused, SmoothOcclusionResponse( fused ), 0.45f ) );
 	}
 
 	static bool IsGIDebugViewActive()
@@ -335,13 +352,13 @@ class DazzleLighting
 		dazzlePrimary = max( dazzlePrimary, primaryIndirect * 0.6f );
 
 		float fusionOcclusion = ComputeFusionOcclusion( dynamicAO, bakedAO, bentNormalVisibility, depthOcclusion, materialRoughness, materialMetalness, curvature );
-		float blendWeight = saturate( Dazzle_DDGIBlend * QualityWeight() * HardwareWeight() * lerp( 0.6f, 1.0f, fusionOcclusion ) );
+		float blendWeight = saturate( Dazzle_DDGIBlend * QualityWeight() * HardwareWeight() * lerp( 0.72f, 1.0f, SmoothOcclusionResponse( fusionOcclusion ) ) );
 		float stability = StabilityWeight();
 		float aoWeight = saturate( fusionOcclusion );
 
 		float3 blended = ExposureAwareBlend( fallbackIndirect, dazzlePrimary, blendWeight );
 		blended = lerp( fallbackIndirect, blended, lerp( stability, 1.0f, aoWeight ) );
-		blended *= max( Dazzle_IndirectIntensity, 0.0f ) * lerp( 0.55f, 1.0f, fusionOcclusion );
+		blended *= max( Dazzle_IndirectIntensity, 0.0f ) * lerp( 0.68f, 1.0f, SmoothOcclusionResponse( fusionOcclusion ) );
 
 		return SafeHdr( blended );
 	}
@@ -372,7 +389,7 @@ class DazzleLighting
 		ApplyDirect( diffuse, specular, transmissive );
 		float3 ambientAccumulated = ComposeAmbient( indirectDiffuse, fallbackIndirect );
 		float bentVisibility = saturate( dot( normalize( bentNormalWs ), normalize( geometricNormalWs ) ) );
-		float depthOcclusion = saturate( 1.0f - abs( screenPosition.z ) * 0.12f );
+		float depthOcclusion = saturate( 1.0f - abs( screenPosition.z ) * 0.08f );
 		float materialMetalness = EstimateMetalnessFromSpecular( materialSpecularColor );
 		float fusedOcclusion = ComputeFusionOcclusion( dynamicAO, bakedAO, bentVisibility, depthOcclusion, roughness, materialMetalness, curvature );
 		indirectDiffuse = ComposeIndirectDiffuse( ambientAccumulated, fallbackIndirect, dynamicAO, bakedAO, bentVisibility, depthOcclusion, roughness, materialMetalness, curvature, screenPosition, normalWs, roughness );
@@ -405,7 +422,7 @@ class DazzleLighting
 		float quality = QualityWeight();
 		float roughnessAttenuation = lerp( 1.0f, 0.82f, saturate( roughness * roughness ) );
 		float scale = max( Dazzle_IndirectIntensity, 0.0f ) * lerp( 0.85f, 1.05f, quality ) * roughnessAttenuation;
-		scale *= lerp( 0.45f, 1.0f, saturate( fusedOcclusion ) );
+		scale *= lerp( 0.62f, 1.0f, SmoothOcclusionResponse( fusedOcclusion ) );
 		float3 boosted = primarySpecular * scale;
 		float specularEnergy = Luminance( boosted );
 		float conservation = rcp( 1.0f + max( specularEnergy - 1.0f, 0.0f ) * 0.25f );

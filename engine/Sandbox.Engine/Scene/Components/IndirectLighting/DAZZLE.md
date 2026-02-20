@@ -73,6 +73,18 @@ The unified backend now fuses these signals per-pixel before final indirect/spec
 
 Compared to the engine default path, Dazzle computes a fused occlusion term and uses it to modulate both diffuse bounce and specular occlusion under energy-conserving HDR blending, rather than treating AO/GI/material terms as mostly separate late-stage multipliers.
 
+
+### Smooth fusion and stability refinements
+
+To reduce brittle/harsh contrast while keeping detail:
+
+- AO fusion now uses soft occlusion fusion (`SoftOcclusionFuse`) instead of hard min-combining.
+- Fused occlusion is remapped through a smooth response curve before affecting diffuse/specular energy.
+- Depth and curvature influence are softened to avoid stacked darkening in creases/corners.
+- Radiance cascade temporal resolve now uses neighborhood-prefiltered current radiance plus variance-aware temporal blending, reducing flicker and sudden jumps.
+
+These changes keep Dazzle physically constrained while producing gentler transitions and richer, more stable lighting than the engine default accumulation.
+
 ## Data Flow
 
 - Per-scene config:

@@ -368,6 +368,14 @@ COMMON
 		return max( radiance * conservation, 0.0f );
 	}
 
+
+	float ComputeTemporalVariance( float3 center, float3 north, float3 south, float3 east, float3 west )
+	{
+		float centerEnergy = ComputeEnergy( center );
+		float neighborhoodEnergy = 0.25f * (ComputeEnergy( north ) + ComputeEnergy( south ) + ComputeEnergy( east ) + ComputeEnergy( west ));
+		return saturate( abs( centerEnergy - neighborhoodEnergy ) / max( neighborhoodEnergy + centerEnergy, 1.0e-4f ) );
+	}
+
 	float ComputeReactiveFactor( uint2 pixelCoord )
 	{
 		int2 fullPixel = FullResPixel( pixelCoord );
@@ -384,9 +392,17 @@ COMMON
 		float2 uv = CascadeUv( pixelCoord );
 		float3 current = DazzleCascadeFar.SampleLevel( g_sBilinearClamp, uv, 0.0f ).rgb;
 		float3 history = DazzleHistoryRadiance.SampleLevel( g_sBilinearClamp, uv, 0.0f ).rgb;
+		float2 step = DazzleInvCascadeSize;
+		float3 currentNorth = DazzleCascadeFar.SampleLevel( g_sBilinearClamp, uv + float2( 0.0f, -step.y ), 0.0f ).rgb;
+		float3 currentSouth = DazzleCascadeFar.SampleLevel( g_sBilinearClamp, uv + float2( 0.0f, step.y ), 0.0f ).rgb;
+		float3 currentEast = DazzleCascadeFar.SampleLevel( g_sBilinearClamp, uv + float2( step.x, 0.0f ), 0.0f ).rgb;
+		float3 currentWest = DazzleCascadeFar.SampleLevel( g_sBilinearClamp, uv + float2( -step.x, 0.0f ), 0.0f ).rgb;
+		float3 prefilteredCurrent = lerp( current, 0.25f * (currentNorth + currentSouth + currentEast + currentWest), 0.35f );
 
 		float reactiveFactor = ComputeReactiveFactor( pixelCoord );
+		float temporalVariance = ComputeTemporalVariance( current, currentNorth, currentSouth, currentEast, currentWest );
 		float temporalBlend = saturate( Dazzle_GITemporalBlend ) * (1.0f - reactiveFactor);
+		temporalBlend = lerp( temporalBlend, temporalBlend * 0.72f, temporalVariance );
 
 		// When doing incremental updates, preserve history harder on skipped tiles.
 		if ( !updatePixel )
@@ -394,7 +410,7 @@ COMMON
 			temporalBlend = max( temporalBlend, 0.95f );
 		}
 
-		float3 resolved = lerp( current, history, temporalBlend );
+		float3 resolved = lerp( prefilteredCurrent, history, temporalBlend );
 		resolved = ExposureAwareClamp( resolved );
 		resolved = EnergyConserve( resolved, 1.0f );
 
@@ -407,7 +423,7 @@ COMMON
 
 			bool invalidRadiance = !IsFiniteFloat3( current ) || !IsFiniteFloat3( history ) || !IsFiniteFloat3( resolved );
 			bool zeroCascade = resolvedEnergy <= 1.0e-6f;
-			bool temporalInstability = deltaEnergy > (0.15f + historyEnergy * 1.25f) && temporalBlend > 0.75f;
+			bool temporalInstability = deltaEnergy > (0.12f + historyEnergy * 1.10f) && temporalBlend > 0.72f;
 			bool clamped = temporalBlend <= 0.001f || temporalBlend >= 0.999f;
 
 			if ( invalidRadiance ) DiagAdd( Diag_IndexInvalidRadiance );
@@ -434,7 +450,7 @@ COMMON
 					resolvedEnergy,
 					temporalBlend,
 					reactiveFactor,
-					deltaEnergy );
+					temporalVariance );
 			}
 		}
 
