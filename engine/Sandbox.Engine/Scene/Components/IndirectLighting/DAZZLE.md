@@ -79,6 +79,7 @@ Compared to the engine default path, Dazzle computes a fused occlusion term and 
 To reduce brittle/harsh contrast while keeping detail:
 
 - AO fusion now uses soft occlusion fusion (`SoftOcclusionFuse`) instead of hard min-combining.
+- AO influence floors were raised and curvature/depth attenuation relaxed to avoid over-dark crevice shading.
 - Fused occlusion is remapped through a smooth response curve before affecting diffuse/specular energy.
 - Depth and curvature influence are softened to avoid stacked darkening in creases/corners.
 - Radiance cascade temporal resolve now uses neighborhood-prefiltered current radiance plus variance-aware temporal blending, reducing flicker and sudden jumps.
