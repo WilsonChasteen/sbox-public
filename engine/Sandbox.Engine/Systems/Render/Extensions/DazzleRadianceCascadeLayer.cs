@@ -5,19 +5,19 @@ using NativeEngine;
 namespace Sandbox.Rendering;
 
 /// <summary>
-/// Procedural pass that incrementally updates Dazzle radiance cascades.
+/// Procedural pass that incrementally updates Dazzle DISCO GI.
 /// The resulting history texture is sampled by Dazzle lighting in the next frame.
 /// </summary>
-internal sealed class DazzleRadianceCascadeLayer : ProceduralRenderLayer
+internal sealed class DazzleDiscoGILayer : ProceduralRenderLayer
 {
 	private const int TraceBit_AddLayers = 1 << 0;
 	private const int TraceBit_GIEnabled = 1 << 1;
 	private const int TraceBit_TexturesReady = 1 << 2;
 	private const int TraceBit_PublishedValid = 1 << 3;
 	private const int TraceBit_OnRender = 1 << 4;
-	private const int TraceBit_PassNear = 1 << 5;
-	private const int TraceBit_PassFar = 1 << 6;
-	private const int TraceBit_PassTemporal = 1 << 7;
+	private const int TraceBit_PassInject = 1 << 5;
+	private const int TraceBit_PassPropagate = 1 << 6;
+	private const int TraceBit_PassResolve = 1 << 7;
 	private const int TraceBit_HistoryValidBefore = 1 << 8;
 	private const int TraceBit_HistoryValidAfter = 1 << 9;
 	private const int TraceBit_Disabled = 1 << 10;
@@ -54,7 +54,7 @@ internal sealed class DazzleRadianceCascadeLayer : ProceduralRenderLayer
 	private const uint DiagFlagSkippedUpdate = 1u << 6;
 	private const uint DiagFlagNaN = 1u << 7;
 
-	private static readonly ComputeShader CascadeShader = new( "common/Dazzle/dazzle_radiance_cascade_cs" );
+	private static readonly ComputeShader DiscoShader = new( "common/Dazzle/dazzle_disco_gi_cs" );
 	private static readonly uint[] DiagnosticClearData = new uint[DiagBufferLength];
 
 	private RenderViewport _viewport;
@@ -65,6 +65,8 @@ internal sealed class DazzleRadianceCascadeLayer : ProceduralRenderLayer
 	private Texture _cascadeFar;
 	private Texture _historyA;
 	private Texture _historyB;
+	private Texture _voxelCache;
+	private Texture _directionalCache;
 
 	private bool _readFromA = true;
 	private bool _historyValid;
@@ -80,9 +82,9 @@ internal sealed class DazzleRadianceCascadeLayer : ProceduralRenderLayer
 	private int _diagnosticsDroppedFrames;
 	private GpuBuffer<uint> _diagnosticBuffer;
 
-	public DazzleRadianceCascadeLayer()
+	public DazzleDiscoGILayer()
 	{
-		Name = "Dazzle Radiance Cascades";
+		Name = "Dazzle DISCO GI";
 		Flags |= LayerFlags.NeverRemove;
 		Flags |= LayerFlags.DoesntModifyColorBuffers;
 		Flags |= LayerFlags.DoesntModifyDepthStencilBuffer;
@@ -224,53 +226,57 @@ internal sealed class DazzleRadianceCascadeLayer : ProceduralRenderLayer
 		}
 
 		attrs.Set( "DazzleInputColor", frameTexture.ColorTarget );
-		attrs.Set( "DazzleCascadeNear", _cascadeNear );
-		attrs.Set( "DazzleCascadeFar", _cascadeFar );
-		attrs.Set( "DazzleHistoryRadiance", readHistory );
-		attrs.Set( "DazzleOutNear", _cascadeNear );
-		attrs.Set( "DazzleOutFar", _cascadeFar );
-		attrs.Set( "DazzleOutHistory", writeHistory );
+		attrs.Set( "DazzleDiscoIrradiance", _cascadeNear );
+		attrs.Set( "DazzleDiscoLightField", _cascadeFar );
+		attrs.Set( "DazzleDiscoHistory", readHistory );
+		attrs.Set( "DazzleDiscoOutIrradiance", _cascadeNear );
+		attrs.Set( "DazzleDiscoOutLightField", _cascadeFar );
+		attrs.Set( "DazzleDiscoOutHistory", writeHistory );
+		attrs.Set( "DazzleDiscoVoxelCache", _voxelCache );
+		attrs.Set( "DazzleDiscoDirectionalCache", _directionalCache );
 
 		var fullWidth = Math.Max( (float)Graphics.Viewport.Width, 1.0f );
 		var fullHeight = Math.Max( (float)Graphics.Viewport.Height, 1.0f );
 		var invCascade = new Vector2( 1.0f / Math.Max( _cascadeSize.x, 1 ), 1.0f / Math.Max( _cascadeSize.y, 1 ) );
 		var inputScale = new Vector2( fullWidth / Math.Max( _cascadeSize.x, 1 ), fullHeight / Math.Max( _cascadeSize.y, 1 ) );
 
-		attrs.Set( "DazzleInvCascadeSize", invCascade );
-		attrs.Set( "DazzleInputToCascadeScale", inputScale );
-		attrs.Set( "DazzleFrameParity", _frameParity );
+		attrs.Set( "DazzleInvDiscoSize", invCascade );
+		attrs.Set( "DazzleInputToDiscoScale", inputScale );
+		attrs.Set( "DazzleDiscoFrameParity", _frameParity );
 		attrs.Set( "Dazzle_GIUpdateFraction", Graphics.FrameAttributes.GetFloat( "Dazzle_GIUpdateFraction", 1.0f ) );
 		attrs.Set( "Dazzle_GITemporalBlend", Graphics.FrameAttributes.GetFloat( "Dazzle_GITemporalBlend", 0.9f ) );
 		attrs.Set( "Dazzle_GIBounceStrength", Graphics.FrameAttributes.GetFloat( "Dazzle_GIBounceStrength", 0.75f ) );
 		attrs.Set( "Dazzle_MultiBounceInfluence", Graphics.FrameAttributes.GetFloat( "Dazzle_MultiBounceInfluence", 0.65f ) );
+		attrs.Set( "Dazzle_GIVoxelFeedback", Graphics.FrameAttributes.GetFloat( "Dazzle_GIVoxelFeedback", 0.9f ) );
+		attrs.Set( "Dazzle_GIDirectionalCache", Graphics.FrameAttributes.GetFloat( "Dazzle_GIDirectionalCache", 0.7f ) );
 		attrs.Set( "Dazzle_ExposureCompensation", Graphics.FrameAttributes.GetFloat( "Dazzle_ExposureCompensation", 1.0f ) );
 		attrs.Set( "Dazzle_WhitePoint", Graphics.FrameAttributes.GetFloat( "Dazzle_WhitePoint", 8.0f ) );
 		attrs.Set( "Dazzle_TonemapShoulder", Graphics.FrameAttributes.GetFloat( "Dazzle_TonemapShoulder", 0.75f ) );
-		attrs.Set( "DazzleDiagEnabled", _diagnosticsEnabled ? 1 : 0 );
+		attrs.Set( "DazzleDiscoDiagEnabled", _diagnosticsEnabled ? 1 : 0 );
 		if ( _diagnosticsEnabled && _diagnosticBuffer is not null )
 		{
 			_diagnosticBuffer.SetData( DiagnosticClearData );
-			attrs.Set( "DazzleDiagBuffer", _diagnosticBuffer );
+			attrs.Set( "DazzleDiscoDiagBuffer", _diagnosticBuffer );
 		}
 
-		if ( CascadeShader is null )
+		if ( DiscoShader is null )
 		{
-			if ( _traceEnabled ) Log.Error( "[DazzleGI] CascadeShader is null!" );
+			if ( _traceEnabled ) Log.Error( "[DazzleGI] DiscoShader is null!" );
 			RenderAttributes.Pool.Return( attrs );
 			return;
 		}
 
-		attrs.SetCombo( "D_PASS", 0 );
-		CascadeShader.DispatchWithAttributes( attrs, _cascadeSize.x, _cascadeSize.y, 1 );
-		_traceFlags |= TraceBit_PassNear;
+		attrs.SetCombo( "DISCO_PASS", 0 );
+		DiscoShader.DispatchWithAttributes( attrs, _cascadeSize.x, _cascadeSize.y, 1 );
+		_traceFlags |= TraceBit_PassInject;
 
-		attrs.SetCombo( "D_PASS", 1 );
-		CascadeShader.DispatchWithAttributes( attrs, _cascadeSize.x, _cascadeSize.y, 1 );
-		_traceFlags |= TraceBit_PassFar;
+		attrs.SetCombo( "DISCO_PASS", 1 );
+		DiscoShader.DispatchWithAttributes( attrs, _cascadeSize.x, _cascadeSize.y, 1 );
+		_traceFlags |= TraceBit_PassPropagate;
 
-		attrs.SetCombo( "D_PASS", 2 );
-		CascadeShader.DispatchWithAttributes( attrs, _cascadeSize.x, _cascadeSize.y, 1 );
-		_traceFlags |= TraceBit_PassTemporal;
+		attrs.SetCombo( "DISCO_PASS", 2 );
+		DiscoShader.DispatchWithAttributes( attrs, _cascadeSize.x, _cascadeSize.y, 1 );
+		_traceFlags |= TraceBit_PassResolve;
 
 		RenderAttributes.Pool.Return( attrs );
 
@@ -334,10 +340,12 @@ internal sealed class DazzleRadianceCascadeLayer : ProceduralRenderLayer
 
 		ReleaseTextures();
 
-		_cascadeNear = CreateRadianceTexture( "DazzleCascadeNear", targetWidth, targetHeight );
-		_cascadeFar = CreateRadianceTexture( "DazzleCascadeFar", targetWidth, targetHeight );
-		_historyA = CreateRadianceTexture( "DazzleCascadeHistoryA", targetWidth, targetHeight );
-		_historyB = CreateRadianceTexture( "DazzleCascadeHistoryB", targetWidth, targetHeight );
+		_cascadeNear = CreateRadianceTexture( "DazzleDiscoIrradiance", targetWidth, targetHeight );
+		_cascadeFar = CreateRadianceTexture( "DazzleDiscoLightField", targetWidth, targetHeight );
+		_historyA = CreateRadianceTexture( "DazzleDiscoHistoryA", targetWidth, targetHeight );
+		_historyB = CreateRadianceTexture( "DazzleDiscoHistoryB", targetWidth, targetHeight );
+		_voxelCache = CreateRadianceTexture( "DazzleDiscoVoxelCache", targetWidth, targetHeight );
+		_directionalCache = CreateRadianceTexture( "DazzleDiscoDirectionalCache", targetWidth, targetHeight );
 		_cascadeSize = desiredSize;
 		_historyValid = false;
 		_readFromA = true;
@@ -357,11 +365,15 @@ internal sealed class DazzleRadianceCascadeLayer : ProceduralRenderLayer
 		_cascadeFar?.Dispose();
 		_historyA?.Dispose();
 		_historyB?.Dispose();
+		_voxelCache?.Dispose();
+		_directionalCache?.Dispose();
 
 		_cascadeNear = null;
 		_cascadeFar = null;
 		_historyA = null;
 		_historyB = null;
+		_voxelCache = null;
+		_directionalCache = null;
 
 		ReleaseDiagnosticBuffer();
 	}
@@ -371,7 +383,7 @@ internal sealed class DazzleRadianceCascadeLayer : ProceduralRenderLayer
 		if ( _diagnosticBuffer is { IsValid: true } )
 			return;
 
-		_diagnosticBuffer = new GpuBuffer<uint>( DiagBufferLength, GpuBuffer.UsageFlags.Structured, "DazzleGiDiagnostics" );
+		_diagnosticBuffer = new GpuBuffer<uint>( DiagBufferLength, GpuBuffer.UsageFlags.Structured, "DazzleDiscoGIDiagnostics" );
 	}
 
 	private void ReleaseDiagnosticBuffer()
@@ -424,7 +436,7 @@ internal sealed class DazzleRadianceCascadeLayer : ProceduralRenderLayer
 		uint invalidRadiance = data[DiagIndexInvalidRadiance];
 		uint nanValues = data[DiagIndexNaNValues];
 		uint zeroCascade = data[DiagIndexZeroCascade];
-		uint propagationFailures = data[DiagIndexPropagationFailures];
+		uint light-field propagationFailures = data[DiagIndexPropagationFailures];
 		uint missingInputs = data[DiagIndexMissingInputs];
 		uint temporalInstability = data[DiagIndexTemporalInstability];
 		uint clampedValues = data[DiagIndexClampedValues];
@@ -433,7 +445,7 @@ internal sealed class DazzleRadianceCascadeLayer : ProceduralRenderLayer
 			invalidRadiance > 0 ||
 			nanValues > 0 ||
 			zeroCascade > 0 ||
-			propagationFailures > 0 ||
+			light-field propagationFailures > 0 ||
 			missingInputs > 0 ||
 			temporalInstability > 0;
 
@@ -445,7 +457,7 @@ internal sealed class DazzleRadianceCascadeLayer : ProceduralRenderLayer
 
 		Log.Info(
 			$"[DazzleGI.Diagnostic][Summary] frame={traceFrame} stageMask=0x{stageMask:X} pixels={updatedPixels}/{totalPixels} " +
-			$"invalid={invalidRadiance} nan={nanValues} zero={zeroCascade} propagation={propagationFailures} " +
+			$"invalid={invalidRadiance} nan={nanValues} zero={zeroCascade} light-field propagation={light-field propagationFailures} " +
 			$"missingInputs={missingInputs} temporalInstability={temporalInstability} clamped={clampedValues} droppedReadbacks={droppedFrames}" );
 
 		if ( !verbose && !hasErrors )

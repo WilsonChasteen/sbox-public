@@ -12,7 +12,7 @@ internal sealed class DazzleRenderExtension : RenderExtension
 {
 	private sealed class ViewState
 	{
-		public DazzleRadianceCascadeLayer CascadeLayer { get; } = new();
+		public DazzleDiscoGILayer DiscoLayer { get; } = new();
 	}
 
 	private static bool _capabilitiesInitialized;
@@ -62,7 +62,9 @@ internal sealed class DazzleRenderExtension : RenderExtension
 		attrs.SetFloatValue( "Dazzle_GIResolutionScale", attrs.GetFloatValue( "Dazzle_GIResolutionScale", 0.5f ) );
 		attrs.SetFloatValue( "Dazzle_GIUpdateFraction", attrs.GetFloatValue( "Dazzle_GIUpdateFraction", 1.0f ) );
 		attrs.SetFloatValue( "Dazzle_GITemporalBlend", attrs.GetFloatValue( "Dazzle_GITemporalBlend", 0.9f ) );
-		attrs.SetFloatValue( "Dazzle_GIBounceStrength", attrs.GetFloatValue( "Dazzle_GIBounceStrength", 0.75f ) );
+		attrs.SetFloatValue( "Dazzle_GIBounceStrength", attrs.GetFloatValue( "Dazzle_GIBounceStrength", 0.8f ) );
+		attrs.SetFloatValue( "Dazzle_GIVoxelFeedback", attrs.GetFloatValue( "Dazzle_GIVoxelFeedback", 0.9f ) );
+		attrs.SetFloatValue( "Dazzle_GIDirectionalCache", attrs.GetFloatValue( "Dazzle_GIDirectionalCache", 0.7f ) );
 		attrs.SetFloatValue( "Dazzle_MultiBounceInfluence", attrs.GetFloatValue( "Dazzle_MultiBounceInfluence", 0.65f ) );
 		attrs.SetFloatValue( "Dazzle_EmissiveBlend", attrs.GetFloatValue( "Dazzle_EmissiveBlend", 1.0f ) );
 		attrs.SetFloatValue( "Dazzle_VolumetricBlend", attrs.GetFloatValue( "Dazzle_VolumetricBlend", 0.85f ) );
@@ -85,7 +87,7 @@ internal sealed class DazzleRenderExtension : RenderExtension
 		if ( giEnabled )
 		{
 			var viewState = GetOrCreateViewState( GetStateKey( view ) );
-			viewState.CascadeLayer.PublishForShading( view, true );
+			viewState.DiscoLayer.PublishForShading( view, true );
 
 			if ( attrs.GetBoolValue( "Dazzle_GIPipelineTrace", false ) )
 			{
@@ -110,8 +112,8 @@ internal sealed class DazzleRenderExtension : RenderExtension
 			return;
 
 		var viewState = GetOrCreateViewState( GetStateKey( view ) );
-		viewState.CascadeLayer.Setup( view, viewport );
-		viewState.CascadeLayer.AddToView( view, viewport );
+		viewState.DiscoLayer.Setup( view, viewport );
+		viewState.DiscoLayer.AddToView( view, viewport );
 	}
 
 	private static int GetStateKey( ISceneView view )

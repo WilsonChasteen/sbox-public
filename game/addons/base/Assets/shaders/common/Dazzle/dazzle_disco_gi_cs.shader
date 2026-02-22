@@ -2,7 +2,7 @@
 HEADER
 {
 	DevShader = true;
-	Description = "Dazzle real-time radiance cascade GI update pass";
+	Description = "Dazzle real-time DISCO GI update pass";
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -28,16 +28,18 @@ COMMON
 	#include "common/classes/ScreenSpaceAmbientOcclusion.hlsl"
 
 	Texture2D DazzleInputColor < Attribute( "DazzleInputColor" ); SrgbRead( false ); >;
-	Texture2D DazzleCascadeNear < Attribute( "DazzleCascadeNear" ); >;
-	Texture2D DazzleCascadeFar < Attribute( "DazzleCascadeFar" ); >;
-	Texture2D DazzleHistoryRadiance < Attribute( "DazzleHistoryRadiance" ); >;
+	Texture2D DazzleDiscoIrradiance < Attribute( "DazzleDiscoIrradiance" ); >;
+	Texture2D DazzleDiscoLightField < Attribute( "DazzleDiscoLightField" ); >;
+	Texture2D DazzleDiscoHistory < Attribute( "DazzleDiscoHistory" ); >;
 
-	RWTexture2D<float4> DazzleOutNear < Attribute( "DazzleOutNear" ); >;
-	RWTexture2D<float4> DazzleOutFar < Attribute( "DazzleOutFar" ); >;
-	RWTexture2D<float4> DazzleOutHistory < Attribute( "DazzleOutHistory" ); >;
+	RWTexture2D<float4> DazzleDiscoOutIrradiance < Attribute( "DazzleDiscoOutIrradiance" ); >;
+	RWTexture2D<float4> DazzleDiscoOutLightField < Attribute( "DazzleDiscoOutLightField" ); >;
+	RWTexture2D<float4> DazzleDiscoOutHistory < Attribute( "DazzleDiscoOutHistory" ); >;
+	RWTexture2D<float4> DazzleDiscoVoxelCache < Attribute( "DazzleDiscoVoxelCache" ); >;
+	RWTexture2D<float4> DazzleDiscoDirectionalCache < Attribute( "DazzleDiscoDirectionalCache" ); >;
 
-	float2 DazzleInvCascadeSize < Attribute( "DazzleInvCascadeSize" ); >;
-	float2 DazzleInputToCascadeScale < Attribute( "DazzleInputToCascadeScale" ); >;
+	float2 DazzleInvDiscoSize < Attribute( "DazzleInvDiscoSize" ); >;
+	float2 DazzleInputToDiscoScale < Attribute( "DazzleInputToDiscoScale" ); >;
 
 	float Dazzle_GIUpdateFraction < Attribute( "Dazzle_GIUpdateFraction" ); Default( 1.0f ); >;
 	float Dazzle_GITemporalBlend < Attribute( "Dazzle_GITemporalBlend" ); Default( 0.9f ); >;
@@ -46,9 +48,11 @@ COMMON
 	float Dazzle_ExposureCompensation < Attribute( "Dazzle_ExposureCompensation" ); Default( 1.0f ); >;
 	float Dazzle_WhitePoint < Attribute( "Dazzle_WhitePoint" ); Default( 8.0f ); >;
 	float Dazzle_TonemapShoulder < Attribute( "Dazzle_TonemapShoulder" ); Default( 0.75f ); >;
-	int DazzleFrameParity < Attribute( "DazzleFrameParity" ); Default( 0 ); >;
-	int DazzleDiagEnabled < Attribute( "DazzleDiagEnabled" ); Default( 0 ); >;
-	RWStructuredBuffer<uint> DazzleDiagBuffer < Attribute( "DazzleDiagBuffer" ); >;
+	int DazzleDiscoFrameParity < Attribute( "DazzleDiscoFrameParity" ); Default( 0 ); >;
+	int DazzleDiscoDiagEnabled < Attribute( "DazzleDiscoDiagEnabled" ); Default( 0 ); >;
+	RWStructuredBuffer<uint> DazzleDiscoDiagBuffer < Attribute( "DazzleDiscoDiagBuffer" ); >;
+	float Dazzle_GIVoxelFeedback < Attribute( "Dazzle_GIVoxelFeedback" ); Default( 0.9f ); >;
+	float Dazzle_GIDirectionalCache < Attribute( "Dazzle_GIDirectionalCache" ); Default( 0.7f ); >;
 
 	static const uint Diag_Version = 1u;
 	static const uint Diag_IndexVersion = 0u;
@@ -86,7 +90,7 @@ COMMON
 
 	bool DiagEnabled()
 	{
-		return DazzleDiagEnabled != 0;
+		return DazzleDiscoDiagEnabled != 0;
 	}
 
 	bool IsFiniteFloat( float value )
@@ -118,7 +122,7 @@ COMMON
 			return;
 
 		uint previous;
-		InterlockedAdd( DazzleDiagBuffer[index], value, previous );
+		InterlockedAdd( DazzleDiscoDiagBuffer[index], value, previous );
 	}
 
 	void DiagInitHeader( uint2 pixelCoord, uint2 dimensions )
@@ -126,10 +130,10 @@ COMMON
 		if ( !DiagEnabled() || any( pixelCoord != uint2( 0, 0 ) ) )
 			return;
 
-		DazzleDiagBuffer[Diag_IndexVersion] = Diag_Version;
-		DazzleDiagBuffer[Diag_IndexFrameParity] = (uint)(DazzleFrameParity & 3);
-		DazzleDiagBuffer[Diag_IndexCascadeWidth] = dimensions.x;
-		DazzleDiagBuffer[Diag_IndexCascadeHeight] = dimensions.y;
+		DazzleDiscoDiagBuffer[Diag_IndexVersion] = Diag_Version;
+		DazzleDiscoDiagBuffer[Diag_IndexFrameParity] = (uint)(DazzleDiscoFrameParity & 3);
+		DazzleDiscoDiagBuffer[Diag_IndexCascadeWidth] = dimensions.x;
+		DazzleDiscoDiagBuffer[Diag_IndexCascadeHeight] = dimensions.y;
 	}
 
 	void DiagMarkStage( uint stageMask )
@@ -138,7 +142,7 @@ COMMON
 			return;
 
 		uint previous;
-		InterlockedOr( DazzleDiagBuffer[Diag_IndexStageMask], stageMask, previous );
+		InterlockedOr( DazzleDiscoDiagBuffer[Diag_IndexStageMask], stageMask, previous );
 	}
 
 	bool DiagShouldCapture( uint2 pixelCoord, uint stageSalt )
@@ -146,7 +150,7 @@ COMMON
 		uint hash = pixelCoord.x * 73856093u;
 		hash ^= pixelCoord.y * 19349663u;
 		hash ^= stageSalt * 83492791u;
-		hash ^= (uint)(DazzleFrameParity & 3) * 2654435761u;
+		hash ^= (uint)(DazzleDiscoFrameParity & 3) * 2654435761u;
 		return (hash & 63u) == 0u;
 	}
 
@@ -156,35 +160,35 @@ COMMON
 			return;
 
 		uint slot;
-		InterlockedAdd( DazzleDiagBuffer[counterIndex], 1u, slot );
+		InterlockedAdd( DazzleDiscoDiagBuffer[counterIndex], 1u, slot );
 		if ( slot >= Diag_SampleCapacity )
 			return;
 
 		uint writeIndex = baseIndex + slot * Diag_SampleStride;
-		DazzleDiagBuffer[writeIndex + 0u] = PackCell( pixelCoord );
-		DazzleDiagBuffer[writeIndex + 1u] = flags;
-		DazzleDiagBuffer[writeIndex + 2u] = asuint( m0 );
-		DazzleDiagBuffer[writeIndex + 3u] = asuint( m1 );
-		DazzleDiagBuffer[writeIndex + 4u] = asuint( m2 );
-		DazzleDiagBuffer[writeIndex + 5u] = asuint( m3 );
-		DazzleDiagBuffer[writeIndex + 6u] = asuint( m4 );
-		DazzleDiagBuffer[writeIndex + 7u] = asuint( m5 );
+		DazzleDiscoDiagBuffer[writeIndex + 0u] = PackCell( pixelCoord );
+		DazzleDiscoDiagBuffer[writeIndex + 1u] = flags;
+		DazzleDiscoDiagBuffer[writeIndex + 2u] = asuint( m0 );
+		DazzleDiscoDiagBuffer[writeIndex + 3u] = asuint( m1 );
+		DazzleDiscoDiagBuffer[writeIndex + 4u] = asuint( m2 );
+		DazzleDiscoDiagBuffer[writeIndex + 5u] = asuint( m3 );
+		DazzleDiscoDiagBuffer[writeIndex + 6u] = asuint( m4 );
+		DazzleDiscoDiagBuffer[writeIndex + 7u] = asuint( m5 );
 	}
 
 	float2 CascadeUv( uint2 pixelCoord )
 	{
-		return (float2( pixelCoord ) + 0.5f) * DazzleInvCascadeSize;
+		return (float2( pixelCoord ) + 0.5f) * DazzleInvDiscoSize;
 	}
 
 	int2 FullResPixel( uint2 cascadePixel )
 	{
-		return int2( (float2( cascadePixel ) + 0.5f) * DazzleInputToCascadeScale );
+		return int2( (float2( cascadePixel ) + 0.5f) * DazzleInputToDiscoScale );
 	}
 
 	bool ShouldUpdatePixel( uint2 pixelCoord )
 	{
 		uint pattern = (pixelCoord.x & 1u) | ((pixelCoord.y & 1u) << 1u);
-		pattern = (pattern + (uint)(DazzleFrameParity & 3)) & 3;
+		pattern = (pattern + (uint)(DazzleDiscoFrameParity & 3)) & 3;
 
 		uint activeTiles = (uint)clamp( round( saturate( Dazzle_GIUpdateFraction ) * 4.0f ), 1.0f, 4.0f );
 		return pattern < activeTiles;
@@ -193,7 +197,7 @@ COMMON
 	float3 BuildNearCascade( uint2 pixelCoord, bool updatePixel )
 	{
 		float2 uv = CascadeUv( pixelCoord );
-		float3 history = DazzleHistoryRadiance.SampleLevel( g_sBilinearClamp, uv, 0.0f ).rgb;
+		float3 history = DazzleDiscoHistory.SampleLevel( g_sBilinearClamp, uv, 0.0f ).rgb;
 
 		if ( !updatePixel )
 		{
@@ -290,13 +294,13 @@ COMMON
 	float3 PropagateCascades( uint2 pixelCoord )
 	{
 		float2 uv = CascadeUv( pixelCoord );
-		float2 sampleStep = DazzleInvCascadeSize;
+		float2 sampleStep = DazzleInvDiscoSize;
 
-		float3 center = DazzleCascadeNear.SampleLevel( g_sBilinearClamp, uv, 0.0f ).rgb;
-		float3 north = DazzleCascadeNear.SampleLevel( g_sBilinearClamp, uv + float2( 0, -sampleStep.y ), 0.0f ).rgb;
-		float3 south = DazzleCascadeNear.SampleLevel( g_sBilinearClamp, uv + float2( 0, sampleStep.y ), 0.0f ).rgb;
-		float3 east = DazzleCascadeNear.SampleLevel( g_sBilinearClamp, uv + float2( sampleStep.x, 0 ), 0.0f ).rgb;
-		float3 west = DazzleCascadeNear.SampleLevel( g_sBilinearClamp, uv + float2( -sampleStep.x, 0 ), 0.0f ).rgb;
+		float3 center = DazzleDiscoIrradiance.SampleLevel( g_sBilinearClamp, uv, 0.0f ).rgb;
+		float3 north = DazzleDiscoIrradiance.SampleLevel( g_sBilinearClamp, uv + float2( 0, -sampleStep.y ), 0.0f ).rgb;
+		float3 south = DazzleDiscoIrradiance.SampleLevel( g_sBilinearClamp, uv + float2( 0, sampleStep.y ), 0.0f ).rgb;
+		float3 east = DazzleDiscoIrradiance.SampleLevel( g_sBilinearClamp, uv + float2( sampleStep.x, 0 ), 0.0f ).rgb;
+		float3 west = DazzleDiscoIrradiance.SampleLevel( g_sBilinearClamp, uv + float2( -sampleStep.x, 0 ), 0.0f ).rgb;
 
 		float3 neighborhood = (north + south + east + west) * 0.25f;
 		float bounce = max( Dazzle_GIBounceStrength, 0.0f );
@@ -345,6 +349,12 @@ COMMON
 			}
 		}
 
+			float voxelFeedback = max( Dazzle_GIVoxelFeedback, 0.0f );
+		float directionalCache = saturate( Dazzle_GIDirectionalCache );
+		float3 voxelRadiance = lerp( propagated, neighborhood, directionalCache );
+		DazzleDiscoVoxelCache[pixelCoord] = float4( voxelRadiance * voxelFeedback, 1.0f );
+		DazzleDiscoDirectionalCache[pixelCoord] = float4( normalize( abs( east - west ) + abs( north - south ) + 1.0e-4f ), 1.0f );
+
 		return propagated;
 	}
 
@@ -390,13 +400,13 @@ COMMON
 	float3 TemporalResolve( uint2 pixelCoord, bool updatePixel )
 	{
 		float2 uv = CascadeUv( pixelCoord );
-		float3 current = DazzleCascadeFar.SampleLevel( g_sBilinearClamp, uv, 0.0f ).rgb;
-		float3 history = DazzleHistoryRadiance.SampleLevel( g_sBilinearClamp, uv, 0.0f ).rgb;
-		float2 step = DazzleInvCascadeSize;
-		float3 currentNorth = DazzleCascadeFar.SampleLevel( g_sBilinearClamp, uv + float2( 0.0f, -step.y ), 0.0f ).rgb;
-		float3 currentSouth = DazzleCascadeFar.SampleLevel( g_sBilinearClamp, uv + float2( 0.0f, step.y ), 0.0f ).rgb;
-		float3 currentEast = DazzleCascadeFar.SampleLevel( g_sBilinearClamp, uv + float2( step.x, 0.0f ), 0.0f ).rgb;
-		float3 currentWest = DazzleCascadeFar.SampleLevel( g_sBilinearClamp, uv + float2( -step.x, 0.0f ), 0.0f ).rgb;
+		float3 current = DazzleDiscoLightField.SampleLevel( g_sBilinearClamp, uv, 0.0f ).rgb;
+		float3 history = DazzleDiscoHistory.SampleLevel( g_sBilinearClamp, uv, 0.0f ).rgb;
+		float2 step = DazzleInvDiscoSize;
+		float3 currentNorth = DazzleDiscoLightField.SampleLevel( g_sBilinearClamp, uv + float2( 0.0f, -step.y ), 0.0f ).rgb;
+		float3 currentSouth = DazzleDiscoLightField.SampleLevel( g_sBilinearClamp, uv + float2( 0.0f, step.y ), 0.0f ).rgb;
+		float3 currentEast = DazzleDiscoLightField.SampleLevel( g_sBilinearClamp, uv + float2( step.x, 0.0f ), 0.0f ).rgb;
+		float3 currentWest = DazzleDiscoLightField.SampleLevel( g_sBilinearClamp, uv + float2( -step.x, 0.0f ), 0.0f ).rgb;
 		float3 prefilteredCurrent = lerp( current, 0.25f * (currentNorth + currentSouth + currentEast + currentWest), 0.35f );
 
 		float reactiveFactor = ComputeReactiveFactor( pixelCoord );
@@ -410,7 +420,11 @@ COMMON
 			temporalBlend = max( temporalBlend, 0.95f );
 		}
 
-		float3 resolved = lerp( prefilteredCurrent, history, temporalBlend );
+		float3 voxelCache = DazzleDiscoVoxelCache[pixelCoord].rgb;
+		float3 directionalCache = DazzleDiscoDirectionalCache[pixelCoord].rgb;
+		float3 cacheFused = lerp( prefilteredCurrent, voxelCache, saturate( Dazzle_GIDirectionalCache ) * 0.5f );
+		cacheFused *= (0.8f + 0.2f * dot( directionalCache, float3( 0.577f, 0.577f, 0.577f ) ));
+		float3 resolved = lerp( cacheFused, history, temporalBlend );
 		resolved = ExposureAwareClamp( resolved );
 		resolved = EnergyConserve( resolved, 1.0f );
 
@@ -461,14 +475,14 @@ COMMON
 //---------------------------------------------------------------------------------------------------------------------
 CS
 {
-	DynamicCombo( D_PASS, 0..2, Sys( ALL ) );
+	DynamicCombo( DISCO_PASS, 0..2, Sys( ALL ) );
 
 	[numthreads( 8, 8, 1 )]
 	void MainCs( uint3 vThreadId : SV_DispatchThreadID )
 	{
 		uint width;
 		uint height;
-		DazzleOutHistory.GetDimensions( width, height );
+		DazzleDiscoOutHistory.GetDimensions( width, height );
 
 		if ( any( vThreadId.xy >= uint2( width, height ) ) )
 		{
@@ -488,20 +502,20 @@ CS
 			}
 		}
 
-		#if D_PASS == 0
+		#if DISCO_PASS == 0
 		{
 			DiagMarkStage( 1u << 0 );
-			DazzleOutNear[pixelCoord] = float4( BuildNearCascade( pixelCoord, updatePixel ), 1.0f );
+			DazzleDiscoOutIrradiance[pixelCoord] = float4( BuildNearCascade( pixelCoord, updatePixel ), 1.0f );
 		}
-		#elif D_PASS == 1
+		#elif DISCO_PASS == 1
 		{
 			DiagMarkStage( 1u << 1 );
-			DazzleOutFar[pixelCoord] = float4( PropagateCascades( pixelCoord ), 1.0f );
+			DazzleDiscoOutLightField[pixelCoord] = float4( PropagateCascades( pixelCoord ), 1.0f );
 		}
 		#else
 		{
 			DiagMarkStage( 1u << 2 );
-			DazzleOutHistory[pixelCoord] = float4( TemporalResolve( pixelCoord, updatePixel ), 1.0f );
+			DazzleDiscoOutHistory[pixelCoord] = float4( TemporalResolve( pixelCoord, updatePixel ), 1.0f );
 		}
 		#endif
 	}

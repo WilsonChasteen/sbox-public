@@ -6,11 +6,11 @@ Dazzle is a modular direct + indirect lighting subsystem layered on top of the e
 
 - Direct lighting modulation with energy-aware scaling.
 - Indirect lighting composition that blends existing GI paths with Dazzle controls.
-- Real-time radiance cascade GI updated in a procedural compute layer.
+- Real-time DISCO GI updated in a procedural compute layer.
 - Runtime capability handling for low-end hardware tiers (RT and API aware).
 - Scene-level authoring controls through the `DazzleLighting` component.
 
-## Radiance Cascade GI
+## DISCO GI (Directional Irradiance Sparse Cache Optimization)
 
 The radiance cascade module is a 3-pass incremental compute update:
 
@@ -18,7 +18,7 @@ The radiance cascade module is a 3-pass incremental compute update:
 - Inputs: scene color, depth, normals, AO.
 - Produces a stable first-bounce estimate in a low-resolution cache.
 
-2. Cascade propagation:
+2. Directional light-field propagation:
 - Reads near cascade and performs low-bandwidth multi-bounce spread.
 - Bounce gain is controlled by `Dazzle_GIBounceStrength`.
 
@@ -95,7 +95,7 @@ These changes keep Dazzle physically constrained while producing gentler transit
 `DazzleRenderExtension` stamps runtime capability flags and publishes the previous-frame GI texture index.
 
 - GI update:
-`DazzleRadianceCascadeLayer` runs at pipeline end and refreshes caches incrementally.
+`DazzleDiscoGILayer` runs at pipeline end and refreshes caches incrementally.
 
 - Shading consumption:
 `DazzleLighting.hlsl` performs unified exposure-aware blending in `ApplyUnifiedAccumulation` (which internally uses `ApplyDirect`, `ComposeAmbient`, `ComposeIndirectDiffuse`, and `ComposeIndirectSpecular`) and samples `Dazzle_GITextureIndex` for multi-bounce GI.
@@ -106,7 +106,7 @@ This is now executed directly from `vr_lighting.fxc` so VR shading paths use the
 - Shader controls: `game/addons/base/Assets/shaders/common/classes/DazzleLighting.hlsl`
 - Ambient route: `game/addons/base/Assets/shaders/common/classes/AmbientLight.hlsl`
 - Core lighting hook: `game/core/shaders/vr_lighting.fxc`
-- Cascade compute shader: `game/addons/base/Assets/shaders/common/Dazzle/dazzle_radiance_cascade_cs.shader`
+- Cascade compute shader: `game/addons/base/Assets/shaders/common/Dazzle/dazzle_disco_gi_cs.shader`
 - Render extension: `engine/Sandbox.Engine/Systems/Render/Extensions/DazzleRenderExtension.cs`
 - GI update layer: `engine/Sandbox.Engine/Systems/Render/Extensions/DazzleRadianceCascadeLayer.cs`
 - Scene config/system:
@@ -135,8 +135,8 @@ enables per-frame pipeline state tracking.
 selects an in-frame visualization mode.
 1. `TraceState`: color-coded pipeline stage status.
 2. `HistoryRadiance`: current GI history texture.
-3. `NearCascade`: near-pass radiance texture.
-4. `FarCascade`: propagated far-pass radiance texture.
+3. `DiscoIrradiance`: near-pass radiance texture.
+4. `DiscoLightField`: propagated far-pass radiance texture.
 
 - `GI Pipeline Trace Log`:
 prints periodic trace snapshots to log with frame, flags, and texture indices.
