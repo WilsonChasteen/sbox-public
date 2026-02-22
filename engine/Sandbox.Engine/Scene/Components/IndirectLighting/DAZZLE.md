@@ -28,6 +28,64 @@ The radiance cascade module is a 3-pass incremental compute update:
 
 The result is stored in a persistent per-view history texture and sampled by Dazzle shading on the next frame.
 
+## Unified Physical Accumulation Model
+
+Dazzle now uses a single accumulation model for direct, indirect, ambient, emissive, volumetric, and screen-space routed radiance.
+
+At a high level each stage computes:
+
+- `L_hdr = max(0, L_engine + L_dazzle)`
+- `L_tm = TonemapExposureAware( L_hdr, exposure, whitePoint, shoulder )`
+- `E = luminance( L_hdr )`
+- `L_out = EnergyConserve( L_tm * (1 + E) )`
+
+Where:
+
+- `TonemapExposureAware` uses a white-point constrained shoulder curve to prevent white-out while preserving HDR contrast.
+- `EnergyConserve` applies `1 / (1 + max(E - bias, 0) * k)` so boosted light remains physically plausible.
+- Multi-bounce GI is driven by `Dazzle_GIBounceStrength` and `Dazzle_MultiBounceInfluence`.
+- Temporal resolve blends current/history radiance then runs the same exposure + conservation clamp to maintain deterministic frame-to-frame energy.
+
+This keeps Dazzle compatible with the engine BRDF and shadowing path while replacing blend behavior with physically-grounded accumulation.
+
+### New runtime controls
+
+- `Dazzle_MultiBounceInfluence`
+- `Dazzle_EmissiveBlend`
+- `Dazzle_VolumetricBlend`
+- `Dazzle_ScreenSpaceBlend`
+- `Dazzle_ExposureCompensation`
+- `Dazzle_WhitePoint`
+- `Dazzle_TonemapShoulder`
+
+
+### Data fusion sources in the backend
+
+The unified backend now fuses these signals per-pixel before final indirect/specular accumulation:
+
+- Screen-space AO (`flDynamicAmbientOcclusion`)
+- Baked AO (`flBakedAmbientOcclusion`)
+- Bent-normal visibility (`dot( bentNormalWs, geometricNormalWs )`)
+- Depth-derived occlusion (screen-space depth attenuation)
+- Material response terms (roughness + inferred metalness from specular F0)
+- Curvature weighting (`flSSSCurvature`) for crevice/contact preservation
+- Radiance-cascade GI history (`Dazzle_GITextureIndex`) and bounce propagation
+
+Compared to the engine default path, Dazzle computes a fused occlusion term and uses it to modulate both diffuse bounce and specular occlusion under energy-conserving HDR blending, rather than treating AO/GI/material terms as mostly separate late-stage multipliers.
+
+
+### Smooth fusion and stability refinements
+
+To reduce brittle/harsh contrast while keeping detail:
+
+- AO fusion now uses soft occlusion fusion (`SoftOcclusionFuse`) instead of hard min-combining.
+- AO influence floors were raised and curvature/depth attenuation relaxed to avoid over-dark crevice shading.
+- Fused occlusion is remapped through a smooth response curve before affecting diffuse/specular energy.
+- Depth and curvature influence are softened to avoid stacked darkening in creases/corners.
+- Radiance cascade temporal resolve now uses neighborhood-prefiltered current radiance plus variance-aware temporal blending, reducing flicker and sudden jumps.
+
+These changes keep Dazzle physically constrained while producing gentler transitions and richer, more stable lighting than the engine default accumulation.
+
 ## Data Flow
 
 - Per-scene config:
@@ -40,7 +98,8 @@ The result is stored in a persistent per-view history texture and sampled by Daz
 `DazzleRadianceCascadeLayer` runs at pipeline end and refreshes caches incrementally.
 
 - Shading consumption:
-`DazzleLighting.hlsl` samples `Dazzle_GITextureIndex` and injects radiance in `ComposeIndirectDiffuse`.
+`DazzleLighting.hlsl` performs unified exposure-aware blending in `ApplyUnifiedAccumulation` (which internally uses `ApplyDirect`, `ComposeAmbient`, `ComposeIndirectDiffuse`, and `ComposeIndirectSpecular`) and samples `Dazzle_GITextureIndex` for multi-bounce GI.
+This is now executed directly from `vr_lighting.fxc` so VR shading paths use the same accumulation model.
 
 ## Integration Points
 

@@ -30,6 +30,13 @@ float Dazzle_Stability < Attribute( "Dazzle_Stability" ); Default( 0.90f ); >;
 float Dazzle_FallbackStrength < Attribute( "Dazzle_FallbackStrength" ); Default( 0.80f ); >;
 float Dazzle_DDGIBlend < Attribute( "Dazzle_DDGIBlend" ); Default( 1.0f ); >;
 float Dazzle_GIBounceStrength < Attribute( "Dazzle_GIBounceStrength" ); Default( 0.75f ); >;
+float Dazzle_MultiBounceInfluence < Attribute( "Dazzle_MultiBounceInfluence" ); Default( 0.65f ); >;
+float Dazzle_EmissiveBlend < Attribute( "Dazzle_EmissiveBlend" ); Default( 1.0f ); >;
+float Dazzle_VolumetricBlend < Attribute( "Dazzle_VolumetricBlend" ); Default( 0.85f ); >;
+float Dazzle_ScreenSpaceBlend < Attribute( "Dazzle_ScreenSpaceBlend" ); Default( 0.8f ); >;
+float Dazzle_ExposureCompensation < Attribute( "Dazzle_ExposureCompensation" ); Default( 1.0f ); >;
+float Dazzle_WhitePoint < Attribute( "Dazzle_WhitePoint" ); Default( 8.0f ); >;
+float Dazzle_TonemapShoulder < Attribute( "Dazzle_TonemapShoulder" ); Default( 0.75f ); >;
 
 enum DazzleGIDebugView
 {
@@ -78,6 +85,85 @@ class DazzleLighting
 	static float StabilityWeight()
 	{
 		return saturate( Dazzle_Stability );
+	}
+
+	static float Luminance( float3 radiance )
+	{
+		return max( dot( max( radiance, 0.0f ), float3( 0.2126f, 0.7152f, 0.0722f ) ), 0.0f );
+	}
+
+	static float3 SafeHdr( float3 value )
+	{
+		return max( value, 0.0f );
+	}
+
+	static float3 ExposureAwareTonemap( float3 hdr, float exposure, float whitePoint, float shoulder )
+	{
+		hdr = SafeHdr( hdr * max( exposure, 0.0001f ) );
+		float mappedWhite = max( whitePoint * max( exposure, 0.0001f ), 1.0f );
+		float shoulderScale = lerp( 0.65f, 1.5f, saturate( shoulder ) );
+		float3 compressed = hdr * (1.0f + hdr / (mappedWhite * mappedWhite * shoulderScale));
+		return compressed / (1.0f + hdr);
+	}
+
+	static float3 ExposureAwareBlend( float3 baseRadiance, float3 dazzleRadiance, float blendWeight )
+	{
+		float exposure = max( Dazzle_ExposureCompensation, 0.1f );
+		float whitePoint = max( Dazzle_WhitePoint, 1.0f );
+		float shoulder = saturate( Dazzle_TonemapShoulder );
+
+		float3 baseMapped = ExposureAwareTonemap( baseRadiance, exposure, whitePoint, shoulder );
+		float3 dazzleMapped = ExposureAwareTonemap( dazzleRadiance, exposure, whitePoint, shoulder );
+
+		float baseLuma = Luminance( baseRadiance );
+		float dazzleLuma = Luminance( dazzleRadiance );
+		float exposureBias = saturate( dazzleLuma / (baseLuma + dazzleLuma + 1e-4f) );
+		float weightedBlend = saturate( blendWeight * lerp( 0.75f, 1.0f, exposureBias ) );
+
+		float3 blendedMapped = lerp( baseMapped, dazzleMapped, weightedBlend );
+		float restoreScale = lerp( baseLuma, max( dazzleLuma, baseLuma ), weightedBlend );
+		return SafeHdr( blendedMapped * (1.0f + restoreScale) );
+	}
+
+
+	static float EstimateMetalnessFromSpecular( float3 specularColor )
+	{
+		float dielectricF0 = 0.04f;
+		float specLuma = Luminance( specularColor );
+		return saturate( (specLuma - dielectricF0) / max( 1.0f - dielectricF0, 1e-4f ) );
+	}
+
+	static float SoftOcclusionFuse( float a, float b )
+	{
+		a = saturate( a );
+		b = saturate( b );
+		float geometric = sqrt( max( a * b, 0.0f ) );
+		float average = 0.5f * (a + b);
+		return saturate( lerp( average, geometric, 0.65f ) );
+	}
+
+	static float SmoothOcclusionResponse( float value )
+	{
+		return smoothstep( 0.02f, 1.0f, saturate( value ) );
+	}
+
+	static float ComputeFusionOcclusion(
+		float dynamicAO,
+		float bakedAO,
+		float bentNormalVisibility,
+		float depthOcclusion,
+		float roughness,
+		float metalness,
+		float curvature )
+	{
+		float ao = SoftOcclusionFuse( dynamicAO, bakedAO );
+		float bentTerm = lerp( 0.90f, 1.0f, saturate( bentNormalVisibility ) );
+		float depthTerm = lerp( 0.88f, 1.0f, SmoothOcclusionResponse( depthOcclusion ) );
+		float microOcclusion = ao * bentTerm * depthTerm;
+		float materialOcclusion = lerp( microOcclusion, microOcclusion * (1.0f - 0.08f * metalness), saturate( roughness ) );
+		float curvatureOcclusion = lerp( 1.0f, saturate( 1.0f - abs( curvature ) * 0.14f ), 0.35f );
+		float fused = materialOcclusion * curvatureOcclusion;
+		return saturate( lerp( 0.92f, lerp( fused, SmoothOcclusionResponse( fused ), 0.35f ), 0.75f ) );
 	}
 
 	static bool IsGIDebugViewActive()
@@ -199,8 +285,9 @@ class DazzleLighting
 		}
 
 		float blendWeight = saturate( Dazzle_DDGIBlend * QualityWeight() * HardwareWeight() );
-		float3 blended = lerp( fallbackIndirect, primaryIndirect, blendWeight );
-		return max( blended, 0.0f );
+		float3 dazzleAmbient = primaryIndirect * lerp( 0.85f, 1.25f, Dazzle_VolumetricBlend );
+		float3 blended = ExposureAwareBlend( fallbackIndirect, dazzleAmbient, blendWeight );
+		return SafeHdr( blended );
 	}
 
 	static float3 SampleRadianceCascade( float4 screenPosition, float3 normalWs, float roughness )
@@ -230,19 +317,23 @@ class DazzleLighting
 		}
 
 		float quality = QualityWeight();
-		float scale = max( Dazzle_DirectIntensity, 0.0f );
-		scale *= lerp( 0.90f, 1.10f, quality );
+		float intensity = max( Dazzle_DirectIntensity, 0.0f );
+		float directWeight = saturate( Dazzle_ScreenSpaceBlend * quality );
+		float emissiveWeight = saturate( Dazzle_EmissiveBlend );
 
-		// Keep highlights physically plausible when artists overdrive intensity.
-		float energyNormalization = rcp( 1.0f + max( scale - 1.0f, 0.0f ) * 0.5f );
-		float directScale = scale * energyNormalization;
+		float3 directDiffuse = diffuse * intensity;
+		float3 directSpecular = specular * lerp( intensity, intensity * 1.1f, 1.0f - directWeight );
+		float3 directTransmission = transmissive * intensity;
 
-		diffuse *= directScale;
-		specular *= directScale;
-		transmissive *= directScale;
+		float directEnergy = Luminance( directDiffuse + directSpecular + directTransmission );
+		float conservation = rcp( 1.0f + max( directEnergy - 1.0f, 0.0f ) * 0.35f );
+
+		diffuse = SafeHdr( directDiffuse * conservation * directWeight );
+		specular = SafeHdr( directSpecular * conservation * lerp( 1.0f, 0.9f, emissiveWeight ) );
+		transmissive = SafeHdr( directTransmission * conservation );
 	}
 
-	static float3 ComposeIndirectDiffuse( float3 primaryIndirect, float3 fallbackIndirect, float dynamicAO, float4 screenPosition, float3 normalWs, float roughness )
+	static float3 ComposeIndirectDiffuse( float3 primaryIndirect, float3 fallbackIndirect, float dynamicAO, float bakedAO, float bentNormalVisibility, float depthOcclusion, float materialRoughness, float materialMetalness, float curvature, float4 screenPosition, float3 normalWs, float roughness )
 	{
 		if ( !IsEnabled() )
 		{
@@ -255,18 +346,55 @@ class DazzleLighting
 		}
 
 		float3 radianceCascade = SampleRadianceCascade( screenPosition, normalWs, roughness );
-		float3 dazzlePrimary = primaryIndirect + radianceCascade;
-		dazzlePrimary = max( dazzlePrimary, primaryIndirect * 0.5f );
+		float multiBounceInfluence = saturate( Dazzle_MultiBounceInfluence );
+		float3 bouncedCascade = radianceCascade * (1.0f + max( Dazzle_GIBounceStrength, 0.0f ) * multiBounceInfluence);
+		float3 dazzlePrimary = SafeHdr( primaryIndirect + bouncedCascade );
+		dazzlePrimary = max( dazzlePrimary, primaryIndirect * 0.6f );
 
-		float blendWeight = saturate( Dazzle_DDGIBlend * QualityWeight() * HardwareWeight() );
+		float fusionOcclusion = ComputeFusionOcclusion( dynamicAO, bakedAO, bentNormalVisibility, depthOcclusion, materialRoughness, materialMetalness, curvature );
+		float blendWeight = saturate( Dazzle_DDGIBlend * QualityWeight() * HardwareWeight() * lerp( 0.82f, 1.0f, SmoothOcclusionResponse( fusionOcclusion ) ) );
 		float stability = StabilityWeight();
-		float aoWeight = saturate( dynamicAO );
+		float aoWeight = saturate( fusionOcclusion );
 
-		float3 blended = lerp( fallbackIndirect, dazzlePrimary, blendWeight );
+		float3 blended = ExposureAwareBlend( fallbackIndirect, dazzlePrimary, blendWeight );
 		blended = lerp( fallbackIndirect, blended, lerp( stability, 1.0f, aoWeight ) );
-		blended *= max( Dazzle_IndirectIntensity, 0.0f );
+		blended *= max( Dazzle_IndirectIntensity, 0.0f ) * lerp( 0.80f, 1.0f, SmoothOcclusionResponse( fusionOcclusion ) );
 
-		return max( blended, 0.0f );
+		return SafeHdr( blended );
+	}
+
+
+	static void ApplyUnifiedAccumulation(
+		inout float3 diffuse,
+		inout float3 specular,
+		inout float3 indirectDiffuse,
+		inout float3 indirectSpecular,
+		inout float3 transmissive,
+		float3 fallbackIndirect,
+		float dynamicAO,
+		float bakedAO,
+		float3 bentNormalWs,
+		float3 geometricNormalWs,
+		float3 materialSpecularColor,
+		float curvature,
+		float4 screenPosition,
+		float3 normalWs,
+		float roughness )
+	{
+		if ( !IsEnabled() )
+		{
+			return;
+		}
+
+		ApplyDirect( diffuse, specular, transmissive );
+		float3 ambientAccumulated = ComposeAmbient( indirectDiffuse, fallbackIndirect );
+		float bentVisibility = saturate( dot( normalize( bentNormalWs ), normalize( geometricNormalWs ) ) );
+		float depthOcclusion = saturate( 1.0f - abs( screenPosition.z ) * 0.08f );
+		float materialMetalness = EstimateMetalnessFromSpecular( materialSpecularColor );
+		float fusedOcclusion = ComputeFusionOcclusion( dynamicAO, bakedAO, bentVisibility, depthOcclusion, roughness, materialMetalness, curvature );
+		indirectDiffuse = ComposeIndirectDiffuse( ambientAccumulated, fallbackIndirect, dynamicAO, bakedAO, bentVisibility, depthOcclusion, roughness, materialMetalness, curvature, screenPosition, normalWs, roughness );
+		indirectSpecular = ComposeIndirectSpecular( indirectSpecular, roughness, fusedOcclusion );
+		ApplyGIDebugOverride( diffuse, specular, indirectDiffuse, indirectSpecular, transmissive );
 	}
 
 	static void ApplyGIDebugOverride( inout float3 diffuse, inout float3 specular, inout float3 indirectDiffuse, inout float3 indirectSpecular, inout float3 transmissive )
@@ -284,7 +412,7 @@ class DazzleLighting
 		transmissive = 0.0f;
 	}
 
-	static float3 ComposeIndirectSpecular( float3 primarySpecular, float roughness )
+	static float3 ComposeIndirectSpecular( float3 primarySpecular, float roughness, float fusedOcclusion )
 	{
 		if ( !IsEnabled() )
 		{
@@ -292,9 +420,13 @@ class DazzleLighting
 		}
 
 		float quality = QualityWeight();
-		float roughnessAttenuation = lerp( 1.0f, 0.85f, saturate( roughness * roughness ) );
-		float scale = max( Dazzle_IndirectIntensity, 0.0f ) * lerp( 0.80f, 1.0f, quality ) * roughnessAttenuation;
-		return max( primarySpecular * scale, 0.0f );
+		float roughnessAttenuation = lerp( 1.0f, 0.82f, saturate( roughness * roughness ) );
+		float scale = max( Dazzle_IndirectIntensity, 0.0f ) * lerp( 0.85f, 1.05f, quality ) * roughnessAttenuation;
+		scale *= lerp( 0.78f, 1.0f, SmoothOcclusionResponse( fusedOcclusion ) );
+		float3 boosted = primarySpecular * scale;
+		float specularEnergy = Luminance( boosted );
+		float conservation = rcp( 1.0f + max( specularEnergy - 1.0f, 0.0f ) * 0.25f );
+		return SafeHdr( boosted * conservation );
 	}
 };
 

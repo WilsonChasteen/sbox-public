@@ -242,6 +242,10 @@ internal sealed class DazzleRadianceCascadeLayer : ProceduralRenderLayer
 		attrs.Set( "Dazzle_GIUpdateFraction", Graphics.FrameAttributes.GetFloat( "Dazzle_GIUpdateFraction", 1.0f ) );
 		attrs.Set( "Dazzle_GITemporalBlend", Graphics.FrameAttributes.GetFloat( "Dazzle_GITemporalBlend", 0.9f ) );
 		attrs.Set( "Dazzle_GIBounceStrength", Graphics.FrameAttributes.GetFloat( "Dazzle_GIBounceStrength", 0.75f ) );
+		attrs.Set( "Dazzle_MultiBounceInfluence", Graphics.FrameAttributes.GetFloat( "Dazzle_MultiBounceInfluence", 0.65f ) );
+		attrs.Set( "Dazzle_ExposureCompensation", Graphics.FrameAttributes.GetFloat( "Dazzle_ExposureCompensation", 1.0f ) );
+		attrs.Set( "Dazzle_WhitePoint", Graphics.FrameAttributes.GetFloat( "Dazzle_WhitePoint", 8.0f ) );
+		attrs.Set( "Dazzle_TonemapShoulder", Graphics.FrameAttributes.GetFloat( "Dazzle_TonemapShoulder", 0.75f ) );
 		attrs.Set( "DazzleDiagEnabled", _diagnosticsEnabled ? 1 : 0 );
 		if ( _diagnosticsEnabled && _diagnosticBuffer is not null )
 		{
