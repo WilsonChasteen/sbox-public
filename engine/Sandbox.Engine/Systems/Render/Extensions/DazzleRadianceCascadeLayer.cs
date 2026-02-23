@@ -245,7 +245,7 @@ internal sealed class DazzleDiscoGILayer : ProceduralRenderLayer
 		attrs.Set( "DazzleDiscoFrameParity", _frameParity );
 		attrs.Set( "Dazzle_GIUpdateFraction", Graphics.FrameAttributes.GetFloat( "Dazzle_GIUpdateFraction", 1.0f ) );
 		attrs.Set( "Dazzle_GITemporalBlend", Graphics.FrameAttributes.GetFloat( "Dazzle_GITemporalBlend", 0.9f ) );
-		attrs.Set( "Dazzle_GIBounceStrength", Graphics.FrameAttributes.GetFloat( "Dazzle_GIBounceStrength", 0.75f ) );
+		attrs.Set( "Dazzle_GIBounceStrength", Graphics.FrameAttributes.GetFloat( "Dazzle_GIBounceStrength", 0.8f ) );
 		attrs.Set( "Dazzle_MultiBounceInfluence", Graphics.FrameAttributes.GetFloat( "Dazzle_MultiBounceInfluence", 0.65f ) );
 		attrs.Set( "Dazzle_GIVoxelFeedback", Graphics.FrameAttributes.GetFloat( "Dazzle_GIVoxelFeedback", 0.9f ) );
 		attrs.Set( "Dazzle_GIDirectionalCache", Graphics.FrameAttributes.GetFloat( "Dazzle_GIDirectionalCache", 0.7f ) );
@@ -278,13 +278,14 @@ internal sealed class DazzleDiscoGILayer : ProceduralRenderLayer
 		DiscoShader.DispatchWithAttributes( attrs, _cascadeSize.x, _cascadeSize.y, 1 );
 		_traceFlags |= TraceBit_PassResolve;
 
+		var publishTarget = attrs.Get();
 		RenderAttributes.Pool.Return( attrs );
 
 		_readFromA = !_readFromA;
 		_historyValid = true;
 		_frameParity = (_frameParity + 1) & 3;
 		_traceFlags |= TraceBit_HistoryValidAfter;
-		PublishTraceState( attrs.Get(), advanceFrame: true );
+		PublishTraceState( publishTarget, advanceFrame: true );
 		MaybeLogTrace();
 		RequestDiagnosticsReadback();
 	}

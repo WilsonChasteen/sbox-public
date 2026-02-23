@@ -91,7 +91,7 @@ sealed class DazzleLightingSystem : GameObjectSystem<DazzleLightingSystem>
 		attributes.Set( "Dazzle_GIResolutionScale", 0.5f );
 		attributes.Set( "Dazzle_GIUpdateFraction", 1.0f );
 		attributes.Set( "Dazzle_GITemporalBlend", 0.9f );
-		attributes.Set( "Dazzle_GIBounceStrength", 0.75f );
+		attributes.Set( "Dazzle_GIBounceStrength", 0.8f );
 		attributes.Set( "Dazzle_GIVoxelFeedback", 0.9f );
 		attributes.Set( "Dazzle_GIDirectionalCache", 0.7f );
 		attributes.Set( "Dazzle_MultiBounceInfluence", 0.65f );

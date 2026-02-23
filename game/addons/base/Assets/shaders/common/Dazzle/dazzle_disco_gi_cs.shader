@@ -43,7 +43,7 @@ COMMON
 
 	float Dazzle_GIUpdateFraction < Attribute( "Dazzle_GIUpdateFraction" ); Default( 1.0f ); >;
 	float Dazzle_GITemporalBlend < Attribute( "Dazzle_GITemporalBlend" ); Default( 0.9f ); >;
-	float Dazzle_GIBounceStrength < Attribute( "Dazzle_GIBounceStrength" ); Default( 0.75f ); >;
+	float Dazzle_GIBounceStrength < Attribute( "Dazzle_GIBounceStrength" ); Default( 0.8f ); >;
 	float Dazzle_MultiBounceInfluence < Attribute( "Dazzle_MultiBounceInfluence" ); Default( 0.65f ); >;
 	float Dazzle_ExposureCompensation < Attribute( "Dazzle_ExposureCompensation" ); Default( 1.0f ); >;
 	float Dazzle_WhitePoint < Attribute( "Dazzle_WhitePoint" ); Default( 8.0f ); >;
@@ -291,7 +291,20 @@ COMMON
 		return nearCascade;
 	}
 
-	float3 PropagateCascades( uint2 pixelCoord )
+
+	float3 SafeNormalize3( float3 v )
+	{
+		float lenSq = max( dot( v, v ), 1.0e-8f );
+		return v * rsqrt( lenSq );
+	}
+
+	float ComputeDirectionalAnisotropy( float3 center, float3 east, float3 west, float3 north, float3 south )
+	{
+		float3 gradient = abs( east - west ) + abs( north - south );
+		return saturate( ComputeEnergy( gradient ) * 0.35f );
+	}
+
+	float3 PropagateCascades( uint2 pixelCoord, bool updatePixel )
 	{
 		float2 uv = CascadeUv( pixelCoord );
 		float2 sampleStep = DazzleInvDiscoSize;
@@ -302,25 +315,56 @@ COMMON
 		float3 east = DazzleDiscoIrradiance.SampleLevel( g_sBilinearClamp, uv + float2( sampleStep.x, 0 ), 0.0f ).rgb;
 		float3 west = DazzleDiscoIrradiance.SampleLevel( g_sBilinearClamp, uv + float2( -sampleStep.x, 0 ), 0.0f ).rgb;
 
-		float3 neighborhood = (north + south + east + west) * 0.25f;
-		float bounce = max( Dazzle_GIBounceStrength, 0.0f );
-		float multiBounce = saturate( Dazzle_MultiBounceInfluence );
+		float3 crossNeighborhood = (north + south + east + west) * 0.25f;
+		float crossEnergy = ComputeEnergy( crossNeighborhood );
+		float centerEnergy = ComputeEnergy( center );
+		float variance = abs( centerEnergy - crossEnergy ) / max( centerEnergy + crossEnergy, 1.0e-4f );
 
-		float3 propagated = center + neighborhood * bounce;
-		propagated += neighborhood * bounce * multiBounce * 0.5f;
-		propagated /= (1.0f + bounce * (1.0f + multiBounce * 0.5f));
+		float3 neighborhood = crossNeighborhood;
+		if ( variance > 0.14f )
+		{
+			float3 northEast = DazzleDiscoIrradiance.SampleLevel( g_sBilinearClamp, uv + sampleStep * float2( 1, -1 ), 0.0f ).rgb;
+			float3 northWest = DazzleDiscoIrradiance.SampleLevel( g_sBilinearClamp, uv + sampleStep * float2( -1, -1 ), 0.0f ).rgb;
+			float3 southEast = DazzleDiscoIrradiance.SampleLevel( g_sBilinearClamp, uv + sampleStep * float2( 1, 1 ), 0.0f ).rgb;
+			float3 southWest = DazzleDiscoIrradiance.SampleLevel( g_sBilinearClamp, uv + sampleStep * float2( -1, 1 ), 0.0f ).rgb;
+			float3 diagNeighborhood = (northEast + northWest + southEast + southWest) * 0.25f;
+			neighborhood = lerp( neighborhood, 0.6f * neighborhood + 0.4f * diagNeighborhood, saturate( variance * 1.9f ) );
+		}
+
+		float bounceRaw = Dazzle_GIBounceStrength;
+		float bounce = clamp( bounceRaw, 0.0f, 2.0f );
+		float multiBounce = saturate( Dazzle_MultiBounceInfluence );
+		float directionalCache = saturate( Dazzle_GIDirectionalCache );
+		float anisotropy = ComputeDirectionalAnisotropy( center, east, west, north, south );
+
+		float directionalGain = lerp( 1.0f, 1.35f, directionalCache * anisotropy );
+		float diffusion = bounce * directionalGain;
+		float3 propagated = center + neighborhood * diffusion;
+		propagated += neighborhood * diffusion * multiBounce * 0.45f;
+		propagated /= (1.0f + diffusion * (1.0f + multiBounce * 0.45f));
+
+		if ( !updatePixel )
+		{
+			float3 cached = DazzleDiscoVoxelCache[pixelCoord].rgb;
+			propagated = lerp( propagated, cached, 0.75f );
+		}
+
 		propagated = ExposureAwareClamp( propagated );
 		propagated = EnergyConserve( propagated, 0.9f );
 
+		float voxelFeedback = clamp( Dazzle_GIVoxelFeedback, 0.0f, 2.0f );
+		float3 voxelRadiance = lerp( propagated, neighborhood, directionalCache );
+		DazzleDiscoVoxelCache[pixelCoord] = float4( voxelRadiance * voxelFeedback, 1.0f );
+		float3 dirVector = SafeNormalize3( abs( east - west ) + abs( north - south ) + 1.0e-4f );
+		DazzleDiscoDirectionalCache[pixelCoord] = float4( dirVector, 1.0f );
+
 		if ( DiagEnabled() )
 		{
-			float centerEnergy = ComputeEnergy( center );
-			float neighborhoodEnergy = ComputeEnergy( neighborhood );
 			float farEnergy = ComputeEnergy( propagated );
 			bool invalidRadiance = !IsFiniteFloat3( center ) || !IsFiniteFloat3( propagated );
 			bool zeroCascade = farEnergy <= 1.0e-6f;
 			bool propagationFailure = (centerEnergy > 1.0e-4f && farEnergy < centerEnergy * 0.02f) || (farEnergy > centerEnergy * 12.0f + 1.0e-4f);
-			bool clamped = bounce < 0.0f;
+			bool clamped = abs( bounceRaw - bounce ) > 1.0e-4f;
 
 			if ( invalidRadiance ) DiagAdd( Diag_IndexInvalidRadiance );
 			if ( zeroCascade ) DiagAdd( Diag_IndexZeroCascade );
@@ -334,6 +378,7 @@ COMMON
 				if ( zeroCascade ) flags |= Diag_FlagZeroCascade;
 				if ( propagationFailure ) flags |= Diag_FlagPropagationFailure;
 				if ( clamped ) flags |= Diag_FlagClamped;
+				if ( !updatePixel ) flags |= Diag_FlagSkippedUpdate;
 
 				DiagStoreSample(
 					Diag_IndexFarSampleCounter,
@@ -341,19 +386,13 @@ COMMON
 					pixelCoord,
 					flags,
 					centerEnergy,
-					neighborhoodEnergy,
+					ComputeEnergy( neighborhood ),
 					farEnergy,
-					bounce,
-					0.0f,
-					0.0f );
+					diffusion,
+					anisotropy,
+					variance );
 			}
 		}
-
-			float voxelFeedback = max( Dazzle_GIVoxelFeedback, 0.0f );
-		float directionalCache = saturate( Dazzle_GIDirectionalCache );
-		float3 voxelRadiance = lerp( propagated, neighborhood, directionalCache );
-		DazzleDiscoVoxelCache[pixelCoord] = float4( voxelRadiance * voxelFeedback, 1.0f );
-		DazzleDiscoDirectionalCache[pixelCoord] = float4( normalize( abs( east - west ) + abs( north - south ) + 1.0e-4f ), 1.0f );
 
 		return propagated;
 	}
@@ -422,9 +461,12 @@ COMMON
 
 		float3 voxelCache = DazzleDiscoVoxelCache[pixelCoord].rgb;
 		float3 directionalCache = DazzleDiscoDirectionalCache[pixelCoord].rgb;
-		float3 cacheFused = lerp( prefilteredCurrent, voxelCache, saturate( Dazzle_GIDirectionalCache ) * 0.5f );
-		cacheFused *= (0.8f + 0.2f * dot( directionalCache, float3( 0.577f, 0.577f, 0.577f ) ));
-		float3 resolved = lerp( cacheFused, history, temporalBlend );
+		float directionalLuma = saturate( dot( directionalCache, float3( 0.577f, 0.577f, 0.577f ) ) );
+		float cacheWeight = saturate( Dazzle_GIDirectionalCache ) * lerp( 0.35f, 0.65f, directionalLuma );
+		float3 cacheFused = lerp( prefilteredCurrent, voxelCache, cacheWeight );
+		cacheFused *= (0.75f + 0.25f * directionalLuma);
+		float historyTrust = saturate( temporalBlend * (0.9f + 0.1f * directionalLuma) );
+		float3 resolved = lerp( cacheFused, history, historyTrust );
 		resolved = ExposureAwareClamp( resolved );
 		resolved = EnergyConserve( resolved, 1.0f );
 
@@ -510,7 +552,7 @@ CS
 		#elif DISCO_PASS == 1
 		{
 			DiagMarkStage( 1u << 1 );
-			DazzleDiscoOutLightField[pixelCoord] = float4( PropagateCascades( pixelCoord ), 1.0f );
+			DazzleDiscoOutLightField[pixelCoord] = float4( PropagateCascades( pixelCoord, updatePixel ), 1.0f );
 		}
 		#else
 		{
