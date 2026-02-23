@@ -24,9 +24,9 @@ public sealed class DazzleLighting : Component, Component.ExecuteInEditor, Compo
 	{
 		Off = 0,
 		TraceState = 1,
-		HistoryRadiance = 2,
-		NearCascade = 3,
-		FarCascade = 4
+		DiscoHistory = 2,
+		DiscoIrradiance = 3,
+		DiscoLightField = 4
 	}
 
 	[Property, MakeDirty]
@@ -54,24 +54,32 @@ public sealed class DazzleLighting : Component, Component.ExecuteInEditor, Compo
 	public float DDGIBlend { get; set; } = 1.0f;
 
 	[Property, MakeDirty]
-	[Group( "Radiance Cascades" )]
-	public bool EnableRadianceGI { get; set; } = true;
+	[Group( "DISCO GI" )]
+	public bool EnableDiscoGI { get; set; } = true;
 
 	[Property, Range( 0.25f, 1.0f ), MakeDirty]
-	[Group( "Radiance Cascades" )]
-	public float CascadeResolutionScale { get; set; } = 0.5f;
+	[Group( "DISCO GI" )]
+	public float DiscoResolutionScale { get; set; } = 0.6f;
 
 	[Property, Range( 0.25f, 1.0f ), MakeDirty]
-	[Group( "Radiance Cascades" )]
-	public float CascadeUpdateFraction { get; set; } = 1.0f;
+	[Group( "DISCO GI" )]
+	public float DiscoUpdateFraction { get; set; } = 1.0f;
 
 	[Property, Range( 0.0f, 1.0f ), MakeDirty]
-	[Group( "Radiance Cascades" )]
-	public float CascadeTemporalBlend { get; set; } = 0.9f;
+	[Group( "DISCO GI" )]
+	public float DiscoTemporalBlend { get; set; } = 0.9f;
 
 	[Property, Range( 0.0f, 2.0f ), MakeDirty]
-	[Group( "Radiance Cascades" )]
-	public float CascadeBounceStrength { get; set; } = 0.75f;
+	[Group( "DISCO GI" )]
+	public float DiscoPropagationStrength { get; set; } = 0.8f;
+
+	[Property, Range( 0.0f, 2.0f ), MakeDirty]
+	[Group( "DISCO GI" )]
+	public float DiscoVoxelFeedback { get; set; } = 0.9f;
+
+	[Property, Range( 0.0f, 1.0f ), MakeDirty]
+	[Group( "DISCO GI" )]
+	public float DiscoDirectionalCache { get; set; } = 0.7f;
 
 	[Property, Range( 0.0f, 1.0f ), MakeDirty]
 	[Group( "Physical Accumulation" )]
@@ -153,28 +161,28 @@ public sealed class DazzleLighting : Component, Component.ExecuteInEditor, Compo
 			_ => 0.0f
 		};
 
-		float cascadeResolutionScale = Math.Clamp( CascadeResolutionScale, 0.25f, 1.0f );
-		float cascadeUpdateFraction = Math.Clamp( CascadeUpdateFraction, 0.25f, 1.0f );
-		float cascadeTemporalBlend = Math.Clamp( CascadeTemporalBlend, 0.0f, 1.0f );
-		float cascadeBounceStrength = Math.Clamp( CascadeBounceStrength, 0.0f, 2.0f );
+		float discoResolutionScale = Math.Clamp( DiscoResolutionScale, 0.25f, 1.0f );
+		float discoUpdateFraction = Math.Clamp( DiscoUpdateFraction, 0.25f, 1.0f );
+		float discoTemporalBlend = Math.Clamp( DiscoTemporalBlend, 0.0f, 1.0f );
+		float discoPropagationStrength = Math.Clamp( DiscoPropagationStrength, 0.0f, 2.0f );
 
 		// Trim GI budgets gracefully on lower-end GPUs.
 		if ( !hasHardwareRayTracing )
 		{
-			cascadeResolutionScale = Math.Min( cascadeResolutionScale, 0.65f );
-			cascadeUpdateFraction = Math.Min( cascadeUpdateFraction, 0.75f );
-			cascadeTemporalBlend = Math.Max( cascadeTemporalBlend, 0.9f );
+			discoResolutionScale = Math.Min( discoResolutionScale, 0.65f );
+			discoUpdateFraction = Math.Min( discoUpdateFraction, 0.75f );
+			discoTemporalBlend = Math.Max( discoTemporalBlend, 0.9f );
 		}
 
 		if ( !isVulkan )
 		{
-			cascadeResolutionScale = Math.Min( cascadeResolutionScale, 0.5f );
-			cascadeUpdateFraction = Math.Min( cascadeUpdateFraction, 0.5f );
-			cascadeTemporalBlend = Math.Max( cascadeTemporalBlend, 0.92f );
+			discoResolutionScale = Math.Min( discoResolutionScale, 0.5f );
+			discoUpdateFraction = Math.Min( discoUpdateFraction, 0.5f );
+			discoTemporalBlend = Math.Max( discoTemporalBlend, 0.92f );
 		}
 
-		cascadeResolutionScale = Math.Max( 0.25f, cascadeResolutionScale * Math.Max( qualityScale, 0.5f ) );
-		cascadeBounceStrength *= Math.Max( qualityScale, 0.5f );
+		discoResolutionScale = Math.Max( 0.25f, discoResolutionScale * Math.Max( qualityScale, 0.5f ) );
+		discoPropagationStrength *= Math.Max( qualityScale, 0.5f );
 
 		return new DazzleLightingRuntimeData
 		{
@@ -185,11 +193,13 @@ public sealed class DazzleLighting : Component, Component.ExecuteInEditor, Compo
 			Stability = Math.Clamp( TemporalStability, 0.0f, 1.0f ),
 			FallbackStrength = fallbackStrength,
 			DDGIBlend = Math.Clamp( DDGIBlend, 0.0f, 1.0f ),
-			GIEnabled = EnableRadianceGI && quality != DazzleQuality.Off,
-			GIResolutionScale = cascadeResolutionScale,
-			GIUpdateFraction = cascadeUpdateFraction,
-			GITemporalBlend = cascadeTemporalBlend,
-			GIBounceStrength = cascadeBounceStrength,
+			GIEnabled = EnableDiscoGI && quality != DazzleQuality.Off,
+			GIResolutionScale = discoResolutionScale,
+			GIUpdateFraction = discoUpdateFraction,
+			GITemporalBlend = discoTemporalBlend,
+			GIBounceStrength = discoPropagationStrength,
+			GIVoxelFeedback = Math.Clamp( DiscoVoxelFeedback, 0.0f, 2.0f ),
+			GIDirectionalCache = Math.Clamp( DiscoDirectionalCache, 0.0f, 1.0f ),
 			MultiBounceInfluence = Math.Clamp( MultiBounceInfluence, 0.0f, 1.0f ),
 			EmissiveBlend = Math.Clamp( EmissiveBlend, 0.0f, 2.0f ),
 			VolumetricBlend = Math.Clamp( VolumetricBlend, 0.0f, 2.0f ),
@@ -223,6 +233,8 @@ internal struct DazzleLightingRuntimeData
 	public float GIUpdateFraction;
 	public float GITemporalBlend;
 	public float GIBounceStrength;
+	public float GIVoxelFeedback;
+	public float GIDirectionalCache;
 	public float MultiBounceInfluence;
 	public float EmissiveBlend;
 	public float VolumetricBlend;

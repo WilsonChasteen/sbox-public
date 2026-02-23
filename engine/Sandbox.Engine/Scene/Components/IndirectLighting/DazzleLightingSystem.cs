@@ -91,7 +91,9 @@ sealed class DazzleLightingSystem : GameObjectSystem<DazzleLightingSystem>
 		attributes.Set( "Dazzle_GIResolutionScale", 0.5f );
 		attributes.Set( "Dazzle_GIUpdateFraction", 1.0f );
 		attributes.Set( "Dazzle_GITemporalBlend", 0.9f );
-		attributes.Set( "Dazzle_GIBounceStrength", 0.75f );
+		attributes.Set( "Dazzle_GIBounceStrength", 0.8f );
+		attributes.Set( "Dazzle_GIVoxelFeedback", 0.9f );
+		attributes.Set( "Dazzle_GIDirectionalCache", 0.7f );
 		attributes.Set( "Dazzle_MultiBounceInfluence", 0.65f );
 		attributes.Set( "Dazzle_EmissiveBlend", 1.0f );
 		attributes.Set( "Dazzle_VolumetricBlend", 0.85f );
@@ -118,6 +120,8 @@ sealed class DazzleLightingSystem : GameObjectSystem<DazzleLightingSystem>
 		attributes.Set( "Dazzle_GIUpdateFraction", data.GIUpdateFraction );
 		attributes.Set( "Dazzle_GITemporalBlend", data.GITemporalBlend );
 		attributes.Set( "Dazzle_GIBounceStrength", data.GIBounceStrength );
+		attributes.Set( "Dazzle_GIVoxelFeedback", data.GIVoxelFeedback );
+		attributes.Set( "Dazzle_GIDirectionalCache", data.GIDirectionalCache );
 		attributes.Set( "Dazzle_MultiBounceInfluence", data.MultiBounceInfluence );
 		attributes.Set( "Dazzle_EmissiveBlend", data.EmissiveBlend );
 		attributes.Set( "Dazzle_VolumetricBlend", data.VolumetricBlend );

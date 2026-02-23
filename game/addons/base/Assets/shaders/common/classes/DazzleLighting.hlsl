@@ -29,7 +29,7 @@ float Dazzle_IndirectIntensity < Attribute( "Dazzle_IndirectIntensity" ); Defaul
 float Dazzle_Stability < Attribute( "Dazzle_Stability" ); Default( 0.90f ); >;
 float Dazzle_FallbackStrength < Attribute( "Dazzle_FallbackStrength" ); Default( 0.80f ); >;
 float Dazzle_DDGIBlend < Attribute( "Dazzle_DDGIBlend" ); Default( 1.0f ); >;
-float Dazzle_GIBounceStrength < Attribute( "Dazzle_GIBounceStrength" ); Default( 0.75f ); >;
+float Dazzle_GIBounceStrength < Attribute( "Dazzle_GIBounceStrength" ); Default( 0.8f ); >;
 float Dazzle_MultiBounceInfluence < Attribute( "Dazzle_MultiBounceInfluence" ); Default( 0.65f ); >;
 float Dazzle_EmissiveBlend < Attribute( "Dazzle_EmissiveBlend" ); Default( 1.0f ); >;
 float Dazzle_VolumetricBlend < Attribute( "Dazzle_VolumetricBlend" ); Default( 0.85f ); >;
