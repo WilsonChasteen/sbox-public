@@ -266,15 +266,15 @@ internal sealed class DazzleDiscoGILayer : ProceduralRenderLayer
 			return;
 		}
 
-		attrs.SetCombo( "DISCO_PASS", 0 );
+		attrs.SetCombo( "D_PASS", 0 );
 		DiscoShader.DispatchWithAttributes( attrs, _cascadeSize.x, _cascadeSize.y, 1 );
 		_traceFlags |= TraceBit_PassInject;
 
-		attrs.SetCombo( "DISCO_PASS", 1 );
+		attrs.SetCombo( "D_PASS", 1 );
 		DiscoShader.DispatchWithAttributes( attrs, _cascadeSize.x, _cascadeSize.y, 1 );
 		_traceFlags |= TraceBit_PassPropagate;
 
-		attrs.SetCombo( "DISCO_PASS", 2 );
+		attrs.SetCombo( "D_PASS", 2 );
 		DiscoShader.DispatchWithAttributes( attrs, _cascadeSize.x, _cascadeSize.y, 1 );
 		_traceFlags |= TraceBit_PassResolve;
 
@@ -437,7 +437,7 @@ internal sealed class DazzleDiscoGILayer : ProceduralRenderLayer
 		uint invalidRadiance = data[DiagIndexInvalidRadiance];
 		uint nanValues = data[DiagIndexNaNValues];
 		uint zeroCascade = data[DiagIndexZeroCascade];
-		uint light-field propagationFailures = data[DiagIndexPropagationFailures];
+		uint propagationFailures = data[DiagIndexPropagationFailures];
 		uint missingInputs = data[DiagIndexMissingInputs];
 		uint temporalInstability = data[DiagIndexTemporalInstability];
 		uint clampedValues = data[DiagIndexClampedValues];
@@ -446,7 +446,7 @@ internal sealed class DazzleDiscoGILayer : ProceduralRenderLayer
 			invalidRadiance > 0 ||
 			nanValues > 0 ||
 			zeroCascade > 0 ||
-			light-field propagationFailures > 0 ||
+			propagationFailures > 0 ||
 			missingInputs > 0 ||
 			temporalInstability > 0;
 
@@ -458,7 +458,7 @@ internal sealed class DazzleDiscoGILayer : ProceduralRenderLayer
 
 		Log.Info(
 			$"[DazzleGI.Diagnostic][Summary] frame={traceFrame} stageMask=0x{stageMask:X} pixels={updatedPixels}/{totalPixels} " +
-			$"invalid={invalidRadiance} nan={nanValues} zero={zeroCascade} light-field propagation={light-field propagationFailures} " +
+			$"invalid={invalidRadiance} nan={nanValues} zero={zeroCascade} propagation={propagationFailures} " +
 			$"missingInputs={missingInputs} temporalInstability={temporalInstability} clamped={clampedValues} droppedReadbacks={droppedFrames}" );
 
 		if ( !verbose && !hasErrors )

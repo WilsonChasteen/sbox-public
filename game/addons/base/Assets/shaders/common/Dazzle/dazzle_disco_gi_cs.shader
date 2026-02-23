@@ -517,7 +517,7 @@ COMMON
 //---------------------------------------------------------------------------------------------------------------------
 CS
 {
-	DynamicCombo( DISCO_PASS, 0..2, Sys( ALL ) );
+	DynamicCombo( D_PASS, 0..2, Sys( ALL ) );
 
 	[numthreads( 8, 8, 1 )]
 	void MainCs( uint3 vThreadId : SV_DispatchThreadID )
@@ -544,12 +544,12 @@ CS
 			}
 		}
 
-		#if DISCO_PASS == 0
+		#if D_PASS == 0
 		{
 			DiagMarkStage( 1u << 0 );
 			DazzleDiscoOutIrradiance[pixelCoord] = float4( BuildNearCascade( pixelCoord, updatePixel ), 1.0f );
 		}
-		#elif DISCO_PASS == 1
+		#elif D_PASS == 1
 		{
 			DiagMarkStage( 1u << 1 );
 			DazzleDiscoOutLightField[pixelCoord] = float4( PropagateCascades( pixelCoord, updatePixel ), 1.0f );
