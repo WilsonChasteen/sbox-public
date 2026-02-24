@@ -111,6 +111,14 @@ public abstract partial class MoveMode : Component
 	}
 
 	/// <summary>
+	/// Called when the controller performs a jump impulse.
+	/// </summary>
+	public virtual void OnJumped()
+	{
+
+	}
+
+	/// <summary>
 	/// If we're approaching a step, step up if possible
 	/// </summary>
 	protected void TrySteppingUp( float maxDistance )

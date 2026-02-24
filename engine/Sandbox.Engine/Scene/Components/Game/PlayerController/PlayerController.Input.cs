@@ -10,6 +10,10 @@ public sealed partial class PlayerController : Component
 	[Property, Feature( "Input" )] public float DuckedSpeed { get; set; } = 70;
 	[Property, Feature( "Input" )] public float JumpSpeed { get; set; } = 300;
 	[Property, Feature( "Input" )] public float DuckedHeight { get; set; } = 36;
+	[Property, Feature( "Input" ), Category( "Jumping" ), Range( 0, 0.5f )] public float CoyoteTime { get; set; } = 0.1f;
+	[Property, Feature( "Input" ), Category( "Jumping" ), Range( 0, 0.5f )] public float JumpBufferTime { get; set; } = 0.12f;
+	[Property, Feature( "Input" ), Category( "Jumping" ), Range( 0, 0.5f )] public float JumpCooldown { get; set; } = 0.1f;
+	[Property, Feature( "Input" ), Category( "Jumping" )] public bool AutoBhop { get; set; }
 
 	/// <summary>
 	/// Amount of seconds it takes to get from your current speed to your requuested speed, if higher
@@ -61,6 +65,7 @@ public sealed partial class PlayerController : Component
 	[Property, Feature( "Input" ), Category( "Eye Angles" ), Range( 0, 2 )] public float LookSensitivity { get; set; } = 1;
 
 	TimeSince timeSinceJump = 0;
+	TimeSince timeSinceJumpPressed = 999;
 
 	void UpdateEyeAngles()
 	{
@@ -90,13 +95,20 @@ public sealed partial class PlayerController : Component
 
 	void InputJump()
 	{
-		if ( TimeSinceGrounded > 0.33f ) return; // been off the ground for this many seconds, don't jump
-		if ( !Input.Pressed( "Jump" ) ) return; // not pressing jump
-		if ( timeSinceJump < 0.5f ) return; // don't jump too often
+		if ( Input.Pressed( "Jump" ) || (AutoBhop && Input.Down( "Jump" )) )
+		{
+			timeSinceJumpPressed = 0;
+		}
+
+		if ( timeSinceJumpPressed > JumpBufferTime ) return;
+		if ( TimeSinceGrounded > CoyoteTime ) return;
+		if ( timeSinceJump < JumpCooldown ) return;
 		if ( JumpSpeed <= 0 ) return;
 
 		timeSinceJump = 0;
+		timeSinceJumpPressed = 999;
 		Jump( Vector3.Up * JumpSpeed );
+		Mode?.OnJumped();
 		OnJumped();
 
 		IEvents.PostToGameObject( GameObject, x => x.OnJumped() );

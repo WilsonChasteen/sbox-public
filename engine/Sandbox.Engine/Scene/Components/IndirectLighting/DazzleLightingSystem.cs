@@ -87,11 +87,6 @@ sealed class DazzleLightingSystem : GameObjectSystem<DazzleLightingSystem>
 		attributes.Set( "Dazzle_Stability", 0.9f );
 		attributes.Set( "Dazzle_FallbackStrength", 1.0f );
 		attributes.Set( "Dazzle_DDGIBlend", 1.0f );
-		attributes.Set( "Dazzle_GIEnable", false );
-		attributes.Set( "Dazzle_GIResolutionScale", 0.5f );
-		attributes.Set( "Dazzle_GIUpdateFraction", 1.0f );
-		attributes.Set( "Dazzle_GITemporalBlend", 0.9f );
-		attributes.Set( "Dazzle_GIBounceStrength", 0.75f );
 		attributes.Set( "Dazzle_MultiBounceInfluence", 0.65f );
 		attributes.Set( "Dazzle_EmissiveBlend", 1.0f );
 		attributes.Set( "Dazzle_VolumetricBlend", 0.85f );
@@ -99,9 +94,6 @@ sealed class DazzleLightingSystem : GameObjectSystem<DazzleLightingSystem>
 		attributes.Set( "Dazzle_ExposureCompensation", 1.0f );
 		attributes.Set( "Dazzle_WhitePoint", 8.0f );
 		attributes.Set( "Dazzle_TonemapShoulder", 0.75f );
-		attributes.Set( "Dazzle_GIPipelineTrace", false );
-		attributes.Set( "Dazzle_GIDebugView", 0 );
-		attributes.Set( "Dazzle_GIPipelineTraceLog", false );
 	}
 
 	private static void ApplyData( RenderAttributes attributes, DazzleLightingRuntimeData data )
@@ -113,11 +105,6 @@ sealed class DazzleLightingSystem : GameObjectSystem<DazzleLightingSystem>
 		attributes.Set( "Dazzle_Stability", data.Stability );
 		attributes.Set( "Dazzle_FallbackStrength", data.FallbackStrength );
 		attributes.Set( "Dazzle_DDGIBlend", data.DDGIBlend );
-		attributes.Set( "Dazzle_GIEnable", data.GIEnabled );
-		attributes.Set( "Dazzle_GIResolutionScale", data.GIResolutionScale );
-		attributes.Set( "Dazzle_GIUpdateFraction", data.GIUpdateFraction );
-		attributes.Set( "Dazzle_GITemporalBlend", data.GITemporalBlend );
-		attributes.Set( "Dazzle_GIBounceStrength", data.GIBounceStrength );
 		attributes.Set( "Dazzle_MultiBounceInfluence", data.MultiBounceInfluence );
 		attributes.Set( "Dazzle_EmissiveBlend", data.EmissiveBlend );
 		attributes.Set( "Dazzle_VolumetricBlend", data.VolumetricBlend );
@@ -125,8 +112,5 @@ sealed class DazzleLightingSystem : GameObjectSystem<DazzleLightingSystem>
 		attributes.Set( "Dazzle_ExposureCompensation", data.ExposureCompensation );
 		attributes.Set( "Dazzle_WhitePoint", data.WhitePoint );
 		attributes.Set( "Dazzle_TonemapShoulder", data.TonemapShoulder );
-		attributes.Set( "Dazzle_GIPipelineTrace", data.GIPipelineTrace );
-		attributes.Set( "Dazzle_GIDebugView", data.GIDebugView );
-		attributes.Set( "Dazzle_GIPipelineTraceLog", data.GIPipelineTraceLog );
 	}
 }

@@ -22,7 +22,7 @@ class AmbientLight
 {
     static AmbientLightKind GetKind()
     {
-        if ( DazzleLighting::IsEnabled() )
+        if ( DazzleLighting::IsAnyEnabled() )
         {
             return AmbientLightKind::Dazzle;
         }

@@ -15,21 +15,17 @@ bool Dazzle_Enabled < Attribute( "Dazzle_Enabled" ); Default( 0 ); >;
 int Dazzle_Quality < Attribute( "Dazzle_Quality" ); Default( 2 ); >;
 bool Dazzle_HasHardwareRT < Attribute( "Dazzle_HasHardwareRT" ); Default( 0 ); >;
 bool Dazzle_IsVulkan < Attribute( "Dazzle_IsVulkan" ); Default( 0 ); >;
-bool Dazzle_GIEnable < Attribute( "Dazzle_GIEnable" ); Default( 1 ); >;
-bool Dazzle_GIValid < Attribute( "Dazzle_GIValid" ); Default( 0 ); >;
-int Dazzle_GITextureIndex < Attribute( "Dazzle_GITextureIndex" ); Default( 0 ); >;
-int Dazzle_GIDebugView < Attribute( "Dazzle_GIDebugView" ); Default( 0 ); >;
-int Dazzle_GITraceFlags < Attribute( "Dazzle_GITraceFlags" ); Default( 0 ); >;
-int Dazzle_GITraceFrame < Attribute( "Dazzle_GITraceFrame" ); Default( 0 ); >;
-int Dazzle_GITraceNearIndex < Attribute( "Dazzle_GITraceNearIndex" ); Default( 0 ); >;
-int Dazzle_GITraceFarIndex < Attribute( "Dazzle_GITraceFarIndex" ); Default( 0 ); >;
-int Dazzle_GITraceHistoryIndex < Attribute( "Dazzle_GITraceHistoryIndex" ); Default( 0 ); >;
+bool DiscoGI_Enabled < Attribute( "DiscoGI_Enabled" ); Default( 0 ); >;
+bool DiscoGI_Valid < Attribute( "DiscoGI_Valid" ); Default( 0 ); >;
+int DiscoGI_TextureIndex < Attribute( "DiscoGI_TextureIndex" ); Default( 0 ); >;
+int DiscoGI_DebugView < Attribute( "DiscoGI_DebugView" ); Default( 0 ); >;
+int DiscoGI_TraceFlags < Attribute( "DiscoGI_TraceFlags" ); Default( 0 ); >;
 float Dazzle_DirectIntensity < Attribute( "Dazzle_DirectIntensity" ); Default( 1.0f ); >;
 float Dazzle_IndirectIntensity < Attribute( "Dazzle_IndirectIntensity" ); Default( 1.0f ); >;
 float Dazzle_Stability < Attribute( "Dazzle_Stability" ); Default( 0.90f ); >;
 float Dazzle_FallbackStrength < Attribute( "Dazzle_FallbackStrength" ); Default( 0.80f ); >;
 float Dazzle_DDGIBlend < Attribute( "Dazzle_DDGIBlend" ); Default( 1.0f ); >;
-float Dazzle_GIBounceStrength < Attribute( "Dazzle_GIBounceStrength" ); Default( 0.75f ); >;
+float DiscoGI_BounceStrength < Attribute( "DiscoGI_BounceStrength" ); Default( 0.75f ); >;
 float Dazzle_MultiBounceInfluence < Attribute( "Dazzle_MultiBounceInfluence" ); Default( 0.65f ); >;
 float Dazzle_EmissiveBlend < Attribute( "Dazzle_EmissiveBlend" ); Default( 1.0f ); >;
 float Dazzle_VolumetricBlend < Attribute( "Dazzle_VolumetricBlend" ); Default( 0.85f ); >;
@@ -38,20 +34,30 @@ float Dazzle_ExposureCompensation < Attribute( "Dazzle_ExposureCompensation" ); 
 float Dazzle_WhitePoint < Attribute( "Dazzle_WhitePoint" ); Default( 8.0f ); >;
 float Dazzle_TonemapShoulder < Attribute( "Dazzle_TonemapShoulder" ); Default( 0.75f ); >;
 
-enum DazzleGIDebugView
+enum DiscoGIDebugView
 {
-	DazzleGIDebug_Off = 0,
-	DazzleGIDebug_TraceState = 1,
-	DazzleGIDebug_HistoryRadiance = 2,
-	DazzleGIDebug_NearCascade = 3,
-	DazzleGIDebug_FarCascade = 4
+	DiscoGIDebug_Off = 0,
+	DiscoGIDebug_TraceState = 1,
+	DiscoGIDebug_HistoryRadiance = 2,
+	DiscoGIDebug_SpatialCache = 3,
+	DiscoGIDebug_RadianceAccumulation = 4
 };
 
 class DazzleLighting
 {
-	static bool IsEnabled()
+	static bool IsDazzleEnabled()
 	{
 		return Dazzle_Enabled && Dazzle_Quality > DazzleQuality_Off;
+	}
+
+	static bool IsDiscoGIEnabled()
+	{
+		return DiscoGI_Enabled;
+	}
+
+	static bool IsAnyEnabled()
+	{
+		return IsDazzleEnabled() || IsDiscoGIEnabled();
 	}
 
 	static float QualityWeight()
@@ -168,7 +174,7 @@ class DazzleLighting
 
 	static bool IsGIDebugViewActive()
 	{
-		return IsEnabled() && Dazzle_GIDebugView != DazzleGIDebug_Off;
+		return IsDiscoGIEnabled() && DiscoGI_DebugView != DiscoGIDebug_Off;
 	}
 
 	static float2 ScreenUv( float4 screenPosition )
@@ -207,8 +213,8 @@ class DazzleLighting
 		const int TraceBit_TexturesReady = 1 << 2;
 		const int TraceBit_PublishedValid = 1 << 3;
 		const int TraceBit_OnRender = 1 << 4;
-		const int TraceBit_PassNear = 1 << 5;
-		const int TraceBit_PassFar = 1 << 6;
+		const int TraceBit_PassUpdate = 1 << 5;
+		const int TraceBit_PassPropagation = 1 << 6;
 		const int TraceBit_PassTemporal = 1 << 7;
 		const int TraceBit_HistoryValidBefore = 1 << 8;
 		const int TraceBit_HistoryValidAfter = 1 << 9;
@@ -216,25 +222,25 @@ class DazzleLighting
 		const int TraceBit_MissingTargets = 1 << 11;
 		const int TraceBit_DiagnosticFailures = 1 << 12;
 
-		int flags = Dazzle_GITraceFlags;
+		int flags = DiscoGI_TraceFlags;
 
 		float3 stageColor = 0.0f;
 		if ( (flags & TraceBit_AddLayers) != 0 ) stageColor.r += 0.10f;
 		if ( (flags & TraceBit_GIEnabled) != 0 ) stageColor.r += 0.20f;
 		if ( (flags & TraceBit_TexturesReady) != 0 ) stageColor.r += 0.30f;
 		if ( (flags & TraceBit_OnRender) != 0 ) stageColor.g += 0.25f;
-		if ( (flags & TraceBit_PassNear) != 0 ) stageColor.g += 0.15f;
-		if ( (flags & TraceBit_PassFar) != 0 ) stageColor.g += 0.15f;
+		if ( (flags & TraceBit_PassUpdate) != 0 ) stageColor.g += 0.15f;
+		if ( (flags & TraceBit_PassPropagation) != 0 ) stageColor.g += 0.15f;
 		if ( (flags & TraceBit_PassTemporal) != 0 ) stageColor.g += 0.20f;
 		if ( (flags & TraceBit_PublishedValid) != 0 ) stageColor.b += 0.35f;
 		if ( (flags & TraceBit_HistoryValidBefore) != 0 ) stageColor.b += 0.15f;
 		if ( (flags & TraceBit_HistoryValidAfter) != 0 ) stageColor.b += 0.15f;
 		if ( (flags & TraceBit_DiagnosticFailures) != 0 ) stageColor.r += 0.30f;
 
-		float framePulse = 0.6f + 0.4f * frac( (float)Dazzle_GITraceFrame * 0.03125f + uv.x * 0.5f + uv.y * 0.25f );
+		float framePulse = 0.6f + 0.4f * frac( uv.x * 0.5f + uv.y * 0.25f );
 		stageColor *= framePulse;
 
-		if ( (flags & TraceBit_Disabled) != 0 || !Dazzle_GIEnable )
+		if ( (flags & TraceBit_Disabled) != 0 || !DiscoGI_Enabled )
 		{
 			return float3( 1.0f, 0.0f, 1.0f ) * 0.85f + stageColor * 0.15f;
 		}
@@ -249,12 +255,12 @@ class DazzleLighting
 			return float3( 1.0f, 0.3f, 0.05f ) * 0.75f + stageColor * 0.25f;
 		}
 
-		if ( !Dazzle_GIValid || Dazzle_GITextureIndex <= 0 )
+		if ( !DiscoGI_Valid || DiscoGI_TextureIndex <= 0 )
 		{
 			return float3( 1.0f, 0.1f, 0.1f ) * 0.85f + stageColor * 0.15f;
 		}
 
-		float3 history = VisualizeRadiance( Dazzle_GITextureIndex, uv );
+		float3 history = VisualizeRadiance( DiscoGI_TextureIndex, uv );
 		return saturate( stageColor + history * 0.6f );
 	}
 
@@ -262,16 +268,14 @@ class DazzleLighting
 	{
 		float2 uv = ScreenUv( screenPosition );
 
-		switch ( Dazzle_GIDebugView )
+		switch ( DiscoGI_DebugView )
 		{
-			case DazzleGIDebug_TraceState:
+			case DiscoGIDebug_TraceState:
 				return VisualizeTraceState( uv );
-			case DazzleGIDebug_HistoryRadiance:
-				return VisualizeRadiance( Dazzle_GITraceHistoryIndex, uv );
-			case DazzleGIDebug_NearCascade:
-				return VisualizeRadiance( Dazzle_GITraceNearIndex, uv );
-			case DazzleGIDebug_FarCascade:
-				return VisualizeRadiance( Dazzle_GITraceFarIndex, uv );
+			case DiscoGIDebug_HistoryRadiance:
+			case DiscoGIDebug_SpatialCache:
+			case DiscoGIDebug_RadianceAccumulation:
+				return VisualizeRadiance( DiscoGI_TextureIndex, uv );
 		}
 
 		return 0.0f;
@@ -279,7 +283,7 @@ class DazzleLighting
 
 	static float3 ComposeAmbient( float3 primaryIndirect, float3 fallbackIndirect )
 	{
-		if ( !IsEnabled() )
+		if ( !IsDazzleEnabled() )
 		{
 			return primaryIndirect;
 		}
@@ -290,20 +294,20 @@ class DazzleLighting
 		return SafeHdr( blended );
 	}
 
-	static float3 SampleRadianceCascade( float4 screenPosition, float3 normalWs, float roughness )
+	static float3 SampleDiscoGI( float4 screenPosition, float3 normalWs, float roughness )
 	{
-		if ( !Dazzle_GIEnable || !Dazzle_GIValid || Dazzle_GITextureIndex <= 0 )
+		if ( !DiscoGI_Enabled || !DiscoGI_Valid || DiscoGI_TextureIndex <= 0 )
 		{
 			return 0.0f;
 		}
 
 		float2 uv = ScreenUv( screenPosition );
-		float3 giRadiance = SampleBindlessTextureRgb( Dazzle_GITextureIndex, uv );
+		float3 giRadiance = SampleBindlessTextureRgb( DiscoGI_TextureIndex, uv );
 
 		// Preserve coherence with BRDF response.
 		float normalFacing = saturate( normalWs.z * 0.5f + 0.5f );
 		float roughnessAttenuation = lerp( 1.0f, 0.7f, saturate( roughness ) );
-		float cascadeWeight = max( Dazzle_GIBounceStrength, 0.0f ) * (0.5f + 0.5f * normalFacing) * roughnessAttenuation;
+		float cascadeWeight = max( DiscoGI_BounceStrength, 0.0f ) * (0.5f + 0.5f * normalFacing) * roughnessAttenuation;
 		cascadeWeight *= lerp( 1.0f, 1.6f, QualityWeight() );
 
 		return max( giRadiance * cascadeWeight, 0.0f );
@@ -311,7 +315,7 @@ class DazzleLighting
 
 	static void ApplyDirect( inout float3 diffuse, inout float3 specular, inout float3 transmissive )
 	{
-		if ( !IsEnabled() )
+		if ( !IsDazzleEnabled() )
 		{
 			return;
 		}
@@ -335,7 +339,7 @@ class DazzleLighting
 
 	static float3 ComposeIndirectDiffuse( float3 primaryIndirect, float3 fallbackIndirect, float dynamicAO, float bakedAO, float bentNormalVisibility, float depthOcclusion, float materialRoughness, float materialMetalness, float curvature, float4 screenPosition, float3 normalWs, float roughness )
 	{
-		if ( !IsEnabled() )
+		if ( !IsAnyEnabled() )
 		{
 			return primaryIndirect;
 		}
@@ -345,11 +349,16 @@ class DazzleLighting
 			return ComposeGIDebugView( screenPosition );
 		}
 
-		float3 radianceCascade = SampleRadianceCascade( screenPosition, normalWs, roughness );
+		float3 radianceCascade = SampleDiscoGI( screenPosition, normalWs, roughness );
 		float multiBounceInfluence = saturate( Dazzle_MultiBounceInfluence );
-		float3 bouncedCascade = radianceCascade * (1.0f + max( Dazzle_GIBounceStrength, 0.0f ) * multiBounceInfluence);
+		float3 bouncedCascade = radianceCascade * (1.0f + max( DiscoGI_BounceStrength, 0.0f ) * multiBounceInfluence);
 		float3 dazzlePrimary = SafeHdr( primaryIndirect + bouncedCascade );
 		dazzlePrimary = max( dazzlePrimary, primaryIndirect * 0.6f );
+
+		if ( !IsDazzleEnabled() )
+		{
+			return dazzlePrimary;
+		}
 
 		float fusionOcclusion = ComputeFusionOcclusion( dynamicAO, bakedAO, bentNormalVisibility, depthOcclusion, materialRoughness, materialMetalness, curvature );
 		float blendWeight = saturate( Dazzle_DDGIBlend * QualityWeight() * HardwareWeight() * lerp( 0.82f, 1.0f, SmoothOcclusionResponse( fusionOcclusion ) ) );
@@ -381,7 +390,7 @@ class DazzleLighting
 		float3 normalWs,
 		float roughness )
 	{
-		if ( !IsEnabled() )
+		if ( !IsAnyEnabled() )
 		{
 			return;
 		}
@@ -414,7 +423,7 @@ class DazzleLighting
 
 	static float3 ComposeIndirectSpecular( float3 primarySpecular, float roughness, float fusedOcclusion )
 	{
-		if ( !IsEnabled() )
+		if ( !IsDazzleEnabled() )
 		{
 			return primarySpecular;
 		}

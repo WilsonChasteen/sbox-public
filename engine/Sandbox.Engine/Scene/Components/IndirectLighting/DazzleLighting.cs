@@ -20,15 +20,6 @@ public sealed class DazzleLighting : Component, Component.ExecuteInEditor, Compo
 		Cinematic = 3
 	}
 
-	public enum DazzleGIDebugView
-	{
-		Off = 0,
-		TraceState = 1,
-		HistoryRadiance = 2,
-		NearCascade = 3,
-		FarCascade = 4
-	}
-
 	[Property, MakeDirty]
 	public bool EnableDazzle { get; set; } = true;
 
@@ -52,26 +43,6 @@ public sealed class DazzleLighting : Component, Component.ExecuteInEditor, Compo
 	[Property, Range( 0.0f, 1.0f ), MakeDirty]
 	[Group( "Indirect GI" )]
 	public float DDGIBlend { get; set; } = 1.0f;
-
-	[Property, MakeDirty]
-	[Group( "Radiance Cascades" )]
-	public bool EnableRadianceGI { get; set; } = true;
-
-	[Property, Range( 0.25f, 1.0f ), MakeDirty]
-	[Group( "Radiance Cascades" )]
-	public float CascadeResolutionScale { get; set; } = 0.5f;
-
-	[Property, Range( 0.25f, 1.0f ), MakeDirty]
-	[Group( "Radiance Cascades" )]
-	public float CascadeUpdateFraction { get; set; } = 1.0f;
-
-	[Property, Range( 0.0f, 1.0f ), MakeDirty]
-	[Group( "Radiance Cascades" )]
-	public float CascadeTemporalBlend { get; set; } = 0.9f;
-
-	[Property, Range( 0.0f, 2.0f ), MakeDirty]
-	[Group( "Radiance Cascades" )]
-	public float CascadeBounceStrength { get; set; } = 0.75f;
 
 	[Property, Range( 0.0f, 1.0f ), MakeDirty]
 	[Group( "Physical Accumulation" )]
@@ -100,18 +71,6 @@ public sealed class DazzleLighting : Component, Component.ExecuteInEditor, Compo
 	[Property, Range( 0.0f, 1.0f ), MakeDirty]
 	[Group( "Physical Accumulation" )]
 	public float TonemapShoulder { get; set; } = 0.75f;
-
-	[Property, MakeDirty]
-	[Group( "Debug" )]
-	public bool EnableGIPipelineTrace { get; set; } = false;
-
-	[Property, MakeDirty]
-	[Group( "Debug" )]
-	public DazzleGIDebugView GIDebugView { get; set; } = DazzleGIDebugView.Off;
-
-	[Property, MakeDirty]
-	[Group( "Debug" )]
-	public bool GIPipelineTraceLog { get; set; } = false;
 
 	[Property, Range( -100, 100 ), MakeDirty]
 	[Group( "Advanced" )]
@@ -153,29 +112,6 @@ public sealed class DazzleLighting : Component, Component.ExecuteInEditor, Compo
 			_ => 0.0f
 		};
 
-		float cascadeResolutionScale = Math.Clamp( CascadeResolutionScale, 0.25f, 1.0f );
-		float cascadeUpdateFraction = Math.Clamp( CascadeUpdateFraction, 0.25f, 1.0f );
-		float cascadeTemporalBlend = Math.Clamp( CascadeTemporalBlend, 0.0f, 1.0f );
-		float cascadeBounceStrength = Math.Clamp( CascadeBounceStrength, 0.0f, 2.0f );
-
-		// Trim GI budgets gracefully on lower-end GPUs.
-		if ( !hasHardwareRayTracing )
-		{
-			cascadeResolutionScale = Math.Min( cascadeResolutionScale, 0.65f );
-			cascadeUpdateFraction = Math.Min( cascadeUpdateFraction, 0.75f );
-			cascadeTemporalBlend = Math.Max( cascadeTemporalBlend, 0.9f );
-		}
-
-		if ( !isVulkan )
-		{
-			cascadeResolutionScale = Math.Min( cascadeResolutionScale, 0.5f );
-			cascadeUpdateFraction = Math.Min( cascadeUpdateFraction, 0.5f );
-			cascadeTemporalBlend = Math.Max( cascadeTemporalBlend, 0.92f );
-		}
-
-		cascadeResolutionScale = Math.Max( 0.25f, cascadeResolutionScale * Math.Max( qualityScale, 0.5f ) );
-		cascadeBounceStrength *= Math.Max( qualityScale, 0.5f );
-
 		return new DazzleLightingRuntimeData
 		{
 			Enabled = quality != DazzleQuality.Off,
@@ -185,21 +121,13 @@ public sealed class DazzleLighting : Component, Component.ExecuteInEditor, Compo
 			Stability = Math.Clamp( TemporalStability, 0.0f, 1.0f ),
 			FallbackStrength = fallbackStrength,
 			DDGIBlend = Math.Clamp( DDGIBlend, 0.0f, 1.0f ),
-			GIEnabled = EnableRadianceGI && quality != DazzleQuality.Off,
-			GIResolutionScale = cascadeResolutionScale,
-			GIUpdateFraction = cascadeUpdateFraction,
-			GITemporalBlend = cascadeTemporalBlend,
-			GIBounceStrength = cascadeBounceStrength,
 			MultiBounceInfluence = Math.Clamp( MultiBounceInfluence, 0.0f, 1.0f ),
 			EmissiveBlend = Math.Clamp( EmissiveBlend, 0.0f, 2.0f ),
 			VolumetricBlend = Math.Clamp( VolumetricBlend, 0.0f, 2.0f ),
 			ScreenSpaceBlend = Math.Clamp( ScreenSpaceBlend, 0.0f, 2.0f ),
 			ExposureCompensation = Math.Clamp( ExposureCompensation, 0.1f, 4.0f ),
 			WhitePoint = Math.Clamp( WhitePoint, 1.0f, 24.0f ),
-			TonemapShoulder = Math.Clamp( TonemapShoulder, 0.0f, 1.0f ),
-			GIPipelineTrace = EnableGIPipelineTrace,
-			GIDebugView = (int)GIDebugView,
-			GIPipelineTraceLog = GIPipelineTraceLog
+			TonemapShoulder = Math.Clamp( TonemapShoulder, 0.0f, 1.0f )
 		};
 	}
 
@@ -218,11 +146,6 @@ internal struct DazzleLightingRuntimeData
 	public float Stability;
 	public float FallbackStrength;
 	public float DDGIBlend;
-	public bool GIEnabled;
-	public float GIResolutionScale;
-	public float GIUpdateFraction;
-	public float GITemporalBlend;
-	public float GIBounceStrength;
 	public float MultiBounceInfluence;
 	public float EmissiveBlend;
 	public float VolumetricBlend;
@@ -230,7 +153,4 @@ internal struct DazzleLightingRuntimeData
 	public float ExposureCompensation;
 	public float WhitePoint;
 	public float TonemapShoulder;
-	public bool GIPipelineTrace;
-	public int GIDebugView;
-	public bool GIPipelineTraceLog;
 }
