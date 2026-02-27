@@ -25,10 +25,10 @@
 !*.vtex
 
 # Shader files
-# !*.shader
-# !*.fxc
-# !*.hlsl
-# !*.hlsli
+!*.shader
+!*.fxc
+!*.hlsl
+!*.hlsli
 
 # Text files
 !*.txt
