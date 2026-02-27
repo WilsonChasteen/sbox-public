@@ -1,7 +1,7 @@
 //=========================================================================================================================
 // Skin Shader - Using Disney BRDF with Subsurface Scattering
 //=========================================================================================================================
-// Realistic human skin shading with epidermis/dermis layers
+// Realistic human skin shading with subsurface scattering approximation
 // Supports: All skin tones, subsurface scattering, specular control
 //=========================================================================================================================
 HEADER
@@ -15,7 +15,6 @@ FEATURES
 {
     #include "common/features.hlsl"
     Feature( F_SKIN_TYPE, 0..4( 0 = "Fair", 1 = "Medium", 2 = "Dark", 3 = "Asian", 4 = "African" ), "Skin Type");
-    Feature( F_SKIN_QUALITY, 0..1( 0 = "High Quality (Full SSS)", 1 = "Fast (Approximate SSS)" ), "Quality");
 }
 
 //=========================================================================================================================
@@ -30,10 +29,6 @@ MODES
 COMMON
 {
     #include "common/shared.hlsl"
-    #include "common/BRDF.hlsl"
-    #include "common/BRDF_Extended.hlsl"
-    #include "common/BRDF_Material.hlsl"
-    #include "common/BRDF_ShadingModels.hlsl"
 }
 
 //=========================================================================================================================
@@ -69,7 +64,6 @@ PS
 {
     // Combos
     StaticCombo( S_SKIN_TYPE, F_SKIN_TYPE, Sys( ALL ) );
-    StaticCombo( S_SKIN_QUALITY, F_SKIN_QUALITY, Sys( ALL ) );
     StaticCombo( S_MODE_DEPTH, 0..1, Sys(ALL) );
 
     // Attributes
@@ -88,27 +82,18 @@ PS
     // Subsurface scattering
     float g_flSubsurfaceStrength < Default(0.7); Range(0.0, 1.0); UiGroup("Subsurface,20/10"); > ;
     float g_flSubsurfaceThickness < Default(0.5); Range(0.0, 2.0); UiGroup("Subsurface,20/20"); > ;
-    float3 g_flSubsurfaceColor < Default3(1.0, 0.7, 0.6); UiType(Color); UiGroup("Subsurface,20/30"); > ;
+    float3 g_flSubsurfaceColorDefault < Default3(1.0, 0.7, 0.6); UiType(Color); UiGroup("Subsurface,20/30"); > ;
     
     // Specular
     float g_flSpecularWeight < Default(0.5); Range(0.0, 1.0); UiGroup("Specular,30/10"); > ;
     float g_flSpecularRoughness < Default(0.4); Range(0.0, 1.0); UiGroup("Specular,30/20"); > ;
-    float3 g_flSpecularTint < Default3(1.0, 1.0, 1.0); UiType(Color); UiGroup("Specular,30/30"); > ;
-    
-    // Detail
-    float g_flDetailNormalScale < Default(1.0); Range(0.0, 2.0); UiGroup("Detail,40/10"); > ;
-    float g_flRoughnessVariation < Default(0.2); Range(0.0, 1.0); UiGroup("Detail,40/20"); > ;
-    
-    // Blood flow (for dynamic reddening)
-    float g_flBloodFlow < Default(0.0); Range(0.0, 1.0); UiGroup("Advanced,50/10"); > ;
 
     //=========================================================================================================================
-    // Helper Functions
+    // Main Pixel Shader
     //=========================================================================================================================
-    
-    MaterialExtended GetSkinMaterial(PixelInput i)
+    float4 MainPs(PixelInput i) : SV_Target0
     {
-        MaterialExtended m = MaterialExtended::FromBase(Material::Init(i));
+        Material m = Material::From(i);
         
         // Sample textures
         float4 vColor = g_tColor.Sample(TextureFiltering, i.vTextureCoords.xy);
@@ -116,57 +101,38 @@ PS
         float4 vRMA = g_tRma.Sample(TextureFiltering, i.vTextureCoords.xy);
         float3 vTintColor = g_flSkinTint * i.vVertexColor.rgb * g_flTintStrength;
         
-        // Setup skin material using preset based on skin type
-        m = Preset_Skin(S_SKIN_TYPE);
+        // Local subsurface color variable
+        float3 subsurfaceColor = g_flSubsurfaceColorDefault;
         
-        // Apply sampled albedo
+        // Setup skin material
         m.Albedo = vColor.rgb * vTintColor;
         m.Opacity = vColor.a;
-        
-        // Apply roughness from texture with variation
-        float baseRoughness = vRMA.r;
-        m.Roughness = baseRoughness + g_flRoughnessVariation * (vColor.r - 0.5);
-        m.Roughness = saturate(m.Roughness);
-        
-        // Apply subsurface parameters
-        m.Subsurface = g_flSubsurfaceStrength;
-        m.SubsurfaceThickness = g_flSubsurfaceThickness;
-        m.SubsurfaceColor = g_flSubsurfaceColor;
-        
-        // Apply specular
-        m.Specular = g_flSpecularWeight;
-        m.SpecularTint = 0.0; // Skin has achromatic specular
-        m.SpecularTint = length(g_flSpecularTint) > 0.01 ? 1.0 : 0.0;
-        
-        // Blood flow affects subsurface color (reddening)
-        m.SubsurfaceColor = lerp(m.SubsurfaceColor, float3(1.0, 0.3, 0.3), g_flBloodFlow);
-        
-        // Transform normal
+        m.Metalness = 0; // Skin is non-metallic
+        m.Roughness = vRMA.r;
+        m.AmbientOcclusion = vRMA.b;
         m.Normal = TransformNormal(DecodeNormal(vNormalTs.xyz), i.vNormalWs, i.vTangentUWs, i.vTangentVWs);
         
-        // Apply detail normal if available
-        #ifdef g_tNormalDetail
-            float2 detailUV = i.vTextureCoords.xy * 2.0; // Tiled detail
-            float4 vDetailNormal = g_tNormalDetail.Sample(TextureFiltering, detailUV);
-            float3 detailNormalTs = DecodeNormal(vDetailNormal.xy);
-            m.TangentNormal = detailNormalTs * g_flDetailNormalScale;
-            m.Normal = TransformNormal(detailNormalTs, i.vNormalWs, i.vTangentUWs, i.vTangentVWs);
+        // Apply subsurface color based on skin type
+        #if (S_SKIN_TYPE == 0) // Fair
+            m.Albedo = lerp(m.Albedo, float3(0.9, 0.75, 0.65), 0.3);
+            subsurfaceColor = float3(1.0, 0.6, 0.5);
+        #elif (S_SKIN_TYPE == 1) // Medium
+            m.Albedo = lerp(m.Albedo, float3(0.8, 0.6, 0.5), 0.3);
+            subsurfaceColor = float3(0.95, 0.55, 0.45);
+        #elif (S_SKIN_TYPE == 2) // Dark
+            m.Albedo = lerp(m.Albedo, float3(0.5, 0.35, 0.28), 0.3);
+            subsurfaceColor = float3(0.85, 0.45, 0.38);
+        #elif (S_SKIN_TYPE == 3) // Asian
+            m.Albedo = lerp(m.Albedo, float3(0.85, 0.65, 0.55), 0.3);
+            subsurfaceColor = float3(0.95, 0.58, 0.48);
+        #elif (S_SKIN_TYPE == 4) // African
+            m.Albedo = lerp(m.Albedo, float3(0.5, 0.35, 0.28), 0.3);
+            subsurfaceColor = float3(0.85, 0.45, 0.38);
         #endif
         
-        m.WorldTangentU = i.vTangentUWs;
-        m.WorldTangentV = i.vTangentVWs;
-        m.LightmapUV = i.vLightmapUV;
-        m.TextureCoords = i.vTextureCoords.xy;
-        
-        return m;
-    }
-
-    //=========================================================================================================================
-    // Main Pixel Shader
-    //=========================================================================================================================
-    float4 MainPs(PixelInput i) : SV_Target0
-    {
-        MaterialExtended m = GetSkinMaterial(i);
+        // Apply subsurface parameters
+        m.Transmission = subsurfaceColor * g_flSubsurfaceStrength;
+        m.Roughness = lerp(m.Roughness, g_flSpecularRoughness, 0.5);
         
         // Depth pass
         #if S_MODE_DEPTH
@@ -177,31 +143,13 @@ PS
         }
         #endif
         
-        // Shade with appropriate model based on quality
-        float4 color;
-        
-        #if (S_SKIN_QUALITY == 0)
-            // High quality - Full skin BRDF
-            color = ShadingModelSkin::Shade(m, S_SKIN_TYPE);
-        #else
-            // Fast - Simplified skin BRDF
-            color = ShadingModelSkin::ShadeSimple(m);
-        #endif
+        // Shade with standard model (subsurface is handled via transmission)
+        float4 color = ShadingModelStandard::Shade(i, m);
         
         // Tools visualization
         if (ToolsVis::WantsToolsVis())
         {
-            LightingTerms_t lightingTerms = InitLightingTerms();
-            lightingTerms.vDiffuse = m.Albedo;
-            lightingTerms.vSpecular = float3(m.Specular, m.Specular, m.Specular);
-            
-            ToolsVis toolVis = ToolsVis::Init(color, lightingTerms.vDiffuse, lightingTerms.vSpecular, 
-                                              lightingTerms.vDiffuse, lightingTerms.vSpecular, float3(0,0,0));
-            
-            toolVis.HandleAlbedo(color, m.Albedo);
-            toolVis.HandleNormalWs(color, m.Normal);
-            toolVis.HandleRoughness(color, float2(m.Roughness, m.Roughness));
-            
+            color.rgb = m.Albedo;
             color.rgb = saturate(color.rgb);
             return color;
         }

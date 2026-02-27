@@ -935,4 +935,10 @@ float LinearToPerceptualRoughness(float linearRoughness)
     return sqrt(linearRoughness);
 }
 
+// Create anisotropic tangent from direction and normal
+float3 CreateAnisotropicTangent(float3 normal, float3 direction)
+{
+    return normalize(direction - normal * dot(direction, normal));
+}
+
 #endif /* BRDF_HLSL */
