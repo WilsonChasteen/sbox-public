@@ -138,16 +138,16 @@ float3 GetDielectricF0()
 // cosTheta: cosine of incident angle
 float3 FresnelConductor(float cosTheta, float3 n, float3 k)
 {
-    float n2 = n * n;
-    float k2 = k * k;
-    float t2 = n2 + k2;
+    float3 n2 = n * n;
+    float3 k2 = k * k;
+    float3 t2 = n2 + k2;
     float cosTheta2 = cosTheta * cosTheta;
-    
-    float3 R_s = (t2 + cosTheta2 - 2.0 * n * cosTheta) / 
+
+    float3 R_s = (t2 + cosTheta2 - 2.0 * n * cosTheta) /
                  (t2 + cosTheta2 + 2.0 * n * cosTheta);
     float3 R_p = R_s * ((t2 * (cosTheta2 - 2.0 * n * cosTheta) + cosTheta2 * cosTheta2) /
                         (t2 * (cosTheta2 + 2.0 * n * cosTheta) + cosTheta2 * cosTheta2));
-    
+
     return 0.5 * (R_s + R_p);
 }
 
@@ -157,33 +157,25 @@ float3 FresnelConductor(float cosTheta, float3 n, float k)
     return FresnelConductor(cosTheta, n, float3(k, k, k));
 }
 
-// Metal IOR presets (n, k values at 560nm wavelength)
-// Source: https://refractiveindex.info/
-struct MetalIOR
-{
-    float3 n; // Real part
-    float3 k; // Imaginary part (extinction)
-};
-
 // Get metal IOR values for common metals
-MetalIOR GetMetalIOR(int metalType)
+// Returns n (real part) and k (imaginary part) via out parameters
+void GetMetalIORData(int metalType, out float3 n, out float3 k)
 {
     // metalType: 0=Aluminum, 1=Gold, 2=Copper, 3=Silver, 4=Iron, 5=Chrome
     if (metalType == 0) // Aluminum
-        return MetalIOR(float3(1.44, 1.44, 1.44), float3(7.39, 7.39, 7.39));
+    { n = float3(1.44, 1.44, 1.44); k = float3(7.39, 7.39, 7.39); }
     else if (metalType == 1) // Gold
-        return MetalIOR(float3(0.17, 0.37, 1.44), float3(3.00, 2.34, 1.84));
+    { n = float3(0.17, 0.37, 1.44); k = float3(3.00, 2.34, 1.84); }
     else if (metalType == 2) // Copper
-        return MetalIOR(float3(0.21, 0.92, 1.10), float3(3.01, 2.24, 2.01));
+    { n = float3(0.21, 0.92, 1.10); k = float3(3.01, 2.24, 2.01); }
     else if (metalType == 3) // Silver
-        return MetalIOR(float3(0.05, 0.05, 0.05), float3(3.49, 3.49, 3.49));
+    { n = float3(0.05, 0.05, 0.05); k = float3(3.49, 3.49, 3.49); }
     else if (metalType == 4) // Iron
-        return MetalIOR(float3(2.53, 1.63, 1.21), float3(3.29, 2.77, 2.12));
+    { n = float3(2.53, 1.63, 1.21); k = float3(3.29, 2.77, 2.12); }
     else if (metalType == 5) // Chrome
-        return MetalIOR(float3(2.48, 2.03, 1.71), float3(3.60, 3.02, 2.53));
-    
-    // Default to aluminum
-    return MetalIOR(float3(1.44, 1.44, 1.44), float3(7.39, 7.39, 7.39));
+    { n = float3(2.48, 2.03, 1.71); k = float3(3.60, 3.02, 2.53); }
+    else // Default to aluminum
+    { n = float3(1.44, 1.44, 1.44); k = float3(7.39, 7.39, 7.39); }
 }
 
 // Compute F0 for metal using complex IOR (normal incidence)
@@ -199,8 +191,9 @@ float3 ComputeMetalF0(float3 n, float3 k)
 // Get F0 for common metals
 float3 GetMetalF0(int metalType)
 {
-    MetalIOR ior = GetMetalIOR(metalType);
-    return ComputeMetalF0(ior.n, ior.k);
+    float3 n, k;
+    GetMetalIORData(metalType, n, k);
+    return ComputeMetalF0(n, k);
 }
 
 // Blend dielectric and conductor F0 based on metalness
@@ -290,22 +283,23 @@ float SmithGGXCombined(float NdotL, float NdotV, float alpha)
 // Multi-scattering GGX correction for energy conservation
 // Based on "Multiple-Scattering Microfacet Model for Real-Time Image-Based Lighting"
 // Returns energy compensation factor for rough surfaces
+
+// Lambda function for Smith GGX (helper for multi-scattering)
+float SmithLambda(float Ndot, float a2)
+{
+    return (-1.0 + sqrt(1.0 + a2 * (1.0 - Ndot * Ndot) / (Ndot * Ndot))) * 0.5;
+}
+
 float MultiScatteringGGX(float NdotV, float NdotL, float alpha)
 {
     float a2 = alpha * alpha;
-    
-    // Lambda function for Smith GGX
-    float Lambda(float Ndot)
-    {
-        return (-1.0 + sqrt(1.0 + a2 * (1.0 - Ndot * Ndot) / (Ndot * Ndot))) * 0.5;
-    }
-    
-    float lambdaV = Lambda(NdotV);
-    float lambdaL = Lambda(NdotL);
-    
+
+    float lambdaV = SmithLambda(NdotV, a2);
+    float lambdaL = SmithLambda(NdotL, a2);
+
     // Multi-scattering term
     float Ems = 1.0 / (lambdaV + lambdaL + 1.0);
-    
+
     // Energy compensation factor
     return 1.0 - Ems;
 }
@@ -939,19 +933,6 @@ float PerceptualToLinearRoughness(float perceptualRoughness)
 float LinearToPerceptualRoughness(float linearRoughness)
 {
     return sqrt(linearRoughness);
-}
-
-// Compute F0 from IOR (for dielectrics)
-float3 ComputeF0FromIOR(float ior)
-{
-    float n = ior * ior;
-    return float3(n, n, n) * ((1.0 - ior) / (1.0 + ior)) * ((1.0 - ior) / (1.0 + ior));
-}
-
-// Standard dielectric F0 (IOR = 1.5)
-float3 GetDielectricF0()
-{
-    return float3(0.04, 0.04, 0.04);
 }
 
 #endif /* BRDF_HLSL */
